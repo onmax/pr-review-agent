@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { consola } from 'consola'
+import { getValidatedConfig } from '../utils/config'
 
 const IssueCommentSchema = z.object({
   action: z.literal('created'),
@@ -51,10 +52,13 @@ export default defineEventHandler(async (event) => {
     return { status: 'ignored', reason: 'not /review command' }
   }
 
-  // 6. Filter: only allowed users
-  const allowedUsers = ['onmax']
-  if (!allowedUsers.includes(payload.comment.user.login)) {
+  // 6. Filter: allowed users and repos
+  const config = getValidatedConfig()
+  if (config.allowedUsers.length && !config.allowedUsers.includes(payload.comment.user.login)) {
     return { status: 'ignored', reason: 'user not allowed' }
+  }
+  if (config.allowedRepos.length && !config.allowedRepos.includes(payload.repository.full_name)) {
+    return { status: 'ignored', reason: 'repo not allowed' }
   }
 
   // 7. Spawn review process

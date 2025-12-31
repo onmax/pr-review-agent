@@ -5,14 +5,16 @@ const RuntimeConfigSchema = z.object({
   githubWebhookSecret: z.string().min(1, 'GITHUB_WEBHOOK_SECRET is required'),
   githubToken: z.string().min(1, 'GITHUB_TOKEN is required'),
 
-  // Model configuration - allows switching providers in future
+  // Access control
+  allowedUsers: z.string().transform(s => s.split(',').map(u => u.trim()).filter(Boolean)).default(''),
+  allowedRepos: z.string().transform(s => s.split(',').map(r => r.trim()).filter(Boolean)).default(''),
+
+  // Model configuration
   modelProvider: z.enum(['claude', 'openai', 'local']).default('claude'),
   defaultModel: z.string().default('sonnet'),
-
-  // Agent model overrides (for future flexibility)
-  securityModel: z.string().optional(), // defaults to opus for security
-  analysisModel: z.string().optional(), // defaults to sonnet for analysis
-  utilityModel: z.string().optional(), // defaults to haiku for utility tasks
+  securityModel: z.string().optional(),
+  analysisModel: z.string().optional(),
+  utilityModel: z.string().optional(),
 })
 
 export type AppRuntimeConfig = z.infer<typeof RuntimeConfigSchema>
@@ -27,6 +29,8 @@ export function getValidatedConfig(): AppRuntimeConfig {
   const result = RuntimeConfigSchema.safeParse({
     githubWebhookSecret: config.githubWebhookSecret,
     githubToken: config.githubToken,
+    allowedUsers: config.allowedUsers,
+    allowedRepos: config.allowedRepos,
     modelProvider: config.modelProvider,
     defaultModel: config.defaultModel,
     securityModel: config.securityModel,
