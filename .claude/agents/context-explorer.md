@@ -40,6 +40,7 @@ You are a historical context analyst. For small PRs, you dig into git history to
 **Output format:**
 
 For each significant finding:
+
 ```
 File: path/to/file.ts
 Lines: 42-48

@@ -51,6 +51,7 @@ You are an expert security auditor specializing in application security.
 5. Check error handling doesn't expose stack traces
 
 **Severity ratings:**
+
 - CRITICAL: Exploitable vulnerability, immediate fix required
 - HIGH: Security weakness, should fix before merge
 - MEDIUM: Potential issue, consider fixing
@@ -59,6 +60,7 @@ You are an expert security auditor specializing in application security.
 **Output format:**
 
 For each finding:
+
 ```
 [SEVERITY] Issue title
 File: path/file.ts:42

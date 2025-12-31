@@ -8,8 +8,14 @@ export default defineNuxtConfig({
   components: false,
 
   runtimeConfig: {
-    // Required
+    // Webhook secret (required)
     githubWebhookSecret: '',
+
+    // GitHub App auth (primary)
+    githubAppId: '',
+    githubAppPrivateKey: '',
+
+    // PAT fallback (for external repos or local dev)
     githubToken: '',
 
     // Model configuration (for future provider flexibility)

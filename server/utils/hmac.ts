@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
 export function validateWebhookSignature(payload: string | undefined, signature: string | undefined): boolean {
-  if (!payload || !signature) return false
+  if (!payload || !signature)
+    return false
 
   const config = useRuntimeConfig()
   const expected = `sha256=${createHmac('sha256', config.githubWebhookSecret).update(payload).digest('hex')}`

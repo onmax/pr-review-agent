@@ -39,6 +39,7 @@ You are a git validation agent. Your job is to quickly verify the git state is v
 ```
 
 Size thresholds:
+
 - small: < 200 lines changed
 - medium: 200-500 lines
 - large: > 500 lines

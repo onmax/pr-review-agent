@@ -1,12 +1,11 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
-import { tmpdir, homedir } from 'node:os'
-import { join } from 'pathe'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { consola } from 'consola'
 import { ofetch } from 'ofetch'
-import { createIssueComment, parseRepoFullName } from './github'
-import { getValidatedConfig } from './config'
-import { getAgentsForFiles, getAgentCatalog } from './agents'
+import { join } from 'pathe'
+import { getAgentCatalog, getAgentsForFiles } from './agents'
+import { createIssueComment, getCloneToken, parseRepoFullName } from './github'
 
 const logger = consola.withTag('pr-review')
 const SKILLS_URL = 'https://raw.githubusercontent.com/onmax/nuxt-skills/main/skills'
@@ -15,6 +14,7 @@ export interface WebhookPayload {
   repository: { full_name: string, clone_url: string }
   issue: { number: number }
   comment: { body: string, user: { login: string } }
+  installationId?: number // GitHub App installation ID
 }
 
 export function spawnClaudeReview(payload: WebhookPayload): void {
@@ -26,12 +26,13 @@ export function spawnClaudeReview(payload: WebhookPayload): void {
 async function runReview(payload: WebhookPayload): Promise<void> {
   const { owner, repo } = parseRepoFullName(payload.repository.full_name)
   const prNumber = payload.issue.number
+  const installationId = payload.installationId
   const workDir = await mkdtemp(join(tmpdir(), 'pr-review-'))
 
-  const config = getValidatedConfig()
-
   try {
-    const cloneUrl = payload.repository.clone_url.replace('https://', `https://x-access-token:${config.githubToken}@`)
+    // Get token for cloning - uses installation token if available, else PAT
+    const token = await getCloneToken(installationId)
+    const cloneUrl = payload.repository.clone_url.replace('https://', `https://x-access-token:${token}@`)
 
     logger.info(`Cloning ${owner}/${repo} PR #${prNumber}`)
     execFileSync('git', ['clone', '--depth=50', cloneUrl, workDir], { stdio: 'pipe' })
@@ -46,7 +47,7 @@ async function runReview(payload: WebhookPayload): Promise<void> {
     const agentsToSpawn = getAgentsForFiles(changedFiles)
     logger.info(`Spawning ${agentsToSpawn.length} agents: ${agentsToSpawn.join(', ')}`)
 
-    await createIssueComment(owner, repo, prNumber, `🔍 Starting PR review with ${agentsToSpawn.length} agents...`)
+    await createIssueComment(owner, repo, prNumber, `🔍 Starting PR review with ${agentsToSpawn.length} agents...`, installationId)
 
     await ensureSkills()
 
@@ -55,17 +56,18 @@ async function runReview(payload: WebhookPayload): Promise<void> {
     await writeFile(promptFile, prompt)
 
     logger.info('Running Claude Code (sandbox + bypassPermissions)')
-    const result = await runClaudeCLI(workDir, promptFile, config.githubToken)
+    const result = await runClaudeCLI(workDir, promptFile, token)
 
     logger.success(`Completed PR #${prNumber}`)
-    if (result) logger.info(`Output: ${result.length} chars`)
+    if (result)
+      logger.info(`Output: ${result.length} chars`)
 
     await rm(workDir, { recursive: true, force: true }).catch(() => {})
   }
   catch (error) {
     logger.error('Failed:', error)
     await rm(workDir, { recursive: true, force: true }).catch(() => {})
-    await createIssueComment(owner, repo, prNumber, `❌ Review failed. Check server logs.`).catch(() => {})
+    await createIssueComment(owner, repo, prNumber, `❌ Review failed. Check server logs.`, installationId).catch(() => {})
   }
 }
 
@@ -123,11 +125,12 @@ function runClaudeCLI(cwd: string, promptFile: string, githubToken: string): Pro
     })
 
     claude.on('close', (code) => {
-      if (code === 0) resolve(stdout)
+      if (code === 0)
+        resolve(stdout)
       else reject(new Error(`Claude exited ${code}: ${stderr.slice(0, 500)}`))
     })
 
-    claude.on('error', (err) => reject(new Error(`Spawn failed: ${err.message}`)))
+    claude.on('error', err => reject(new Error(`Spawn failed: ${err.message}`)))
   })
 }
 
@@ -137,7 +140,8 @@ function buildOrchestratorPrompt(owner: string, repo: string, prNumber: number, 
   // Build agent task list dynamically
   const agentTasks = agentsToSpawn.map((name, idx) => {
     const agent = catalog[name]
-    if (!agent) return ''
+    if (!agent)
+      return ''
 
     const model = agent.model || 'sonnet'
     const skills = agent.skills?.length ? `Use skills: ${agent.skills.join(', ')}.` : ''

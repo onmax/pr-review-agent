@@ -3,11 +3,17 @@ import { z } from 'zod'
 // Runtime config schema with validation
 const RuntimeConfigSchema = z.object({
   githubWebhookSecret: z.string().min(1, 'GITHUB_WEBHOOK_SECRET is required'),
-  githubToken: z.string().min(1, 'GITHUB_TOKEN is required'),
+
+  // GitHub App (primary auth method)
+  githubAppId: z.string().optional(),
+  githubAppPrivateKey: z.string().optional(),
+
+  // PAT fallback (for external repos or local dev)
+  githubToken: z.string().optional(),
 
   // Access control
-  allowedUsers: z.string().transform(s => s.split(',').map(u => u.trim()).filter(Boolean)).default(''),
-  allowedRepos: z.string().transform(s => s.split(',').map(r => r.trim()).filter(Boolean)).default(''),
+  allowedUsers: z.string().default('').transform(s => s.split(',').map(u => u.trim()).filter(Boolean)),
+  allowedRepos: z.string().default('').transform(s => s.split(',').map(r => r.trim()).filter(Boolean)),
 
   // Model configuration
   modelProvider: z.enum(['claude', 'openai', 'local']).default('claude'),
@@ -22,12 +28,15 @@ export type AppRuntimeConfig = z.infer<typeof RuntimeConfigSchema>
 let validatedConfig: AppRuntimeConfig | null = null
 
 export function getValidatedConfig(): AppRuntimeConfig {
-  if (validatedConfig) return validatedConfig
+  if (validatedConfig)
+    return validatedConfig
 
   const config = useRuntimeConfig()
 
   const result = RuntimeConfigSchema.safeParse({
     githubWebhookSecret: config.githubWebhookSecret,
+    githubAppId: config.githubAppId,
+    githubAppPrivateKey: config.githubAppPrivateKey,
     githubToken: config.githubToken,
     allowedUsers: config.allowedUsers,
     allowedRepos: config.allowedRepos,

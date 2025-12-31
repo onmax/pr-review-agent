@@ -41,12 +41,11 @@ GitHub webhook (issue_comment with /review)
 
 ### Prerequisites
 
-| Requirement | Link |
-|-------------|------|
-| Node.js 22+ | [fnm](https://github.com/Schniz/fnm) (recommended) |
-| pnpm | [pnpm.io/installation](https://pnpm.io/installation) |
+| Requirement     | Link                                                                 |
+| --------------- | -------------------------------------------------------------------- |
+| Node.js 22+     | [fnm](https://github.com/Schniz/fnm) (recommended)                   |
+| pnpm            | [pnpm.io/installation](https://pnpm.io/installation)                 |
 | Claude Code CLI | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
-| GitHub Token | [Create fine-grained token](https://github.com/settings/personal-access-tokens/new) |
 
 ### 1. Clone and Install
 
@@ -56,48 +55,53 @@ cd pr-review-agent
 pnpm install
 ```
 
-### 2. Configure Environment
+### 2. Create GitHub App (Recommended)
+
+Create a GitHub App for automatic webhook handling:
+
+1. Go to [github.com/settings/apps/new](https://github.com/settings/apps/new)
+2. Configure:
+   - **Name**: `PR Review Agent` (or your choice)
+   - **Homepage URL**: `https://github.com/onmax/pr-review-agent`
+   - **Webhook URL**: `http://your-server:3000/webhook`
+   - **Webhook secret**: generate with `openssl rand -hex 20`
+3. Set permissions:
+   - **Contents**: Read
+   - **Issues**: Read & Write
+   - **Pull requests**: Read
+4. Subscribe to events: **Issue comment**
+5. Click **Create GitHub App**
+6. Generate and download a **Private Key**
+7. Note the **App ID**
+8. Install the app on your repos
+
+### 3. Configure Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your values:
+Edit `.env`:
 
 ```bash
-# Generate with: openssl rand -hex 20
+# Webhook secret (same as in GitHub App settings)
 NUXT_GITHUB_WEBHOOK_SECRET=your_webhook_secret
 
-# Fine-grained token with repository access:
-# - Contents: Read
-# - Issues: Read and write
-# - Pull requests: Read and write
-# https://github.com/settings/personal-access-tokens/new
-NUXT_GITHUB_TOKEN=github_pat_xxxxxxxxxxxx
+# GitHub App credentials
+NUXT_GITHUB_APP_ID=123456
+NUXT_GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 
-# Repos allowed to trigger reviews (comma-separated)
-NUXT_ALLOWED_REPOS=owner/repo1,owner/repo2
+# Optional: PAT for external repos (not installed with your app)
+# NUXT_GITHUB_TOKEN=github_pat_xxx
 ```
 
-### 3. Authenticate Claude CLI
+### 4. Authenticate Claude CLI
 
 ```bash
 claude login
 ```
 
 Follow the browser prompts to authenticate with your Claude Code subscription.
-
-### 4. Configure GitHub Webhook
-
-For each repository in `NUXT_ALLOWED_REPOS`:
-
-1. Navigate to **Settings** → **Webhooks** → [**Add webhook**](https://docs.github.com/en/webhooks/using-webhooks/creating-webhooks)
-2. Set **Payload URL** to `http://your-server:3000/webhook`
-3. Set **Content type** to `application/json`
-4. Enter the same **Secret** as `NUXT_GITHUB_WEBHOOK_SECRET`
-5. Under **Which events?**, select **Let me select individual events**
-6. Check only **Issue comments**
-7. Click **Add webhook**
 
 ## Development
 
@@ -218,12 +222,12 @@ The agent uses `--dangerously-skip-permissions` but bubblewrap enforces OS-level
 
 ### Subagents
 
-| Agent             | Model  | Focus                                      |
-| ----------------- | ------ | ------------------------------------------ |
-| nuxt-reviewer     | Sonnet | Composables, server routes, h3 patterns    |
-| vue-reviewer      | Sonnet | Composition API, props/emits, reactivity   |
-| security-reviewer | Opus   | OWASP, secrets, injection, auth gaps       |
-| test-runner       | Haiku  | Run tests, report failures and coverage    |
+| Agent             | Model  | Focus                                    |
+| ----------------- | ------ | ---------------------------------------- |
+| nuxt-reviewer     | Sonnet | Composables, server routes, h3 patterns  |
+| vue-reviewer      | Sonnet | Composition API, props/emits, reactivity |
+| security-reviewer | Opus   | OWASP, secrets, injection, auth gaps     |
+| test-runner       | Haiku  | Run tests, report failures and coverage  |
 
 ### Prompt Engineering
 
@@ -237,7 +241,9 @@ All prompts use XML tags for structure (`<task>`, `<output_format>`, `<parallel_
 
 ## Trigger
 
-Comment `/review` on any open pull request. The agent will:
+### Via GitHub App (automatic)
+
+Comment `/review` on any PR in a repo where your app is installed. The agent will:
 
 1. Post a "Starting PR review..." comment
 2. Clone the PR branch
@@ -245,15 +251,34 @@ Comment `/review` on any open pull request. The agent will:
 4. Aggregate findings (filter confidence < 80)
 5. Post the review comment with linked code
 
+### Via CLI (for external repos)
+
+Trigger reviews on repos where your app isn't installed:
+
+```bash
+# With server running locally
+./cli/index.mjs https://github.com/nuxt/nuxt/pull/123
+
+# With remote server
+PR_REVIEW_SERVER=https://your-server.com ./cli/index.mjs https://github.com/owner/repo/pull/456
+
+# Or with --server flag
+./cli/index.mjs https://github.com/owner/repo/pull/789 --server https://your-server.com
+```
+
+This uses the `/trigger` endpoint which falls back to PAT authentication.
+
 ## Environment Variables
 
-| Variable                    | Required | Description                        |
-| --------------------------- | -------- | ---------------------------------- |
-| `NUXT_GITHUB_WEBHOOK_SECRET` | Yes      | GitHub webhook secret              |
-| `NUXT_GITHUB_TOKEN`          | Yes      | GitHub PAT with repo access        |
-| `NUXT_SECURITY_MODEL`        | No       | Model for security (default: opus) |
-| `NUXT_ANALYSIS_MODEL`        | No       | Model for analysis (default: sonnet) |
-| `NUXT_UTILITY_MODEL`         | No       | Model for utility (default: haiku) |
+| Variable                      | Required | Description                          |
+| ----------------------------- | -------- | ------------------------------------ |
+| `NUXT_GITHUB_WEBHOOK_SECRET`  | Yes      | Webhook secret (same in GitHub App)  |
+| `NUXT_GITHUB_APP_ID`          | For App  | GitHub App ID                        |
+| `NUXT_GITHUB_APP_PRIVATE_KEY` | For App  | GitHub App private key (PEM)         |
+| `NUXT_GITHUB_TOKEN`           | For CLI  | PAT for external repos               |
+| `NUXT_SECURITY_MODEL`         | No       | Model for security (default: opus)   |
+| `NUXT_ANALYSIS_MODEL`         | No       | Model for analysis (default: sonnet) |
+| `NUXT_UTILITY_MODEL`          | No       | Model for utility (default: haiku)   |
 
 ## License
 

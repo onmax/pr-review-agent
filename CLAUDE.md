@@ -48,62 +48,68 @@ gh CLI posts review comment
 Dynamic spawning based on file patterns. Skills shared across agents.
 
 ### Always Spawn
-| Agent | Model | Purpose |
-|-------|-------|---------|
-| security-reviewer | opus | OWASP, secrets, injection, auth |
-| code-quality | sonnet | DRY, complexity, CLAUDE.md |
+
+| Agent             | Model  | Purpose                         |
+| ----------------- | ------ | ------------------------------- |
+| security-reviewer | opus   | OWASP, secrets, injection, auth |
+| code-quality      | sonnet | DRY, complexity, CLAUDE.md      |
 
 ### Framework Agents (triggered by file patterns)
-| Agent | Model | Triggers | Skills |
-|-------|-------|----------|--------|
-| nuxt-reviewer | sonnet | nuxt.config, server/**, app/** | nuxt, nuxt-modules |
-| vue-reviewer | sonnet | *.vue, components/** | vue, reka-ui |
-| api-reviewer | sonnet | server/api/**, routes/** | nuxt, ts-library |
-| nuxthub-reviewer | sonnet | hub/**, drizzle/** | nuxthub |
+
+| Agent            | Model  | Triggers                       | Skills             |
+| ---------------- | ------ | ------------------------------ | ------------------ |
+| nuxt-reviewer    | sonnet | nuxt.config, server/**, app/** | nuxt, nuxt-modules |
+| vue-reviewer     | sonnet | \*.vue, components/\*\*        | vue, reka-ui       |
+| api-reviewer     | sonnet | server/api/**, routes/**       | nuxt, ts-library   |
+| nuxthub-reviewer | sonnet | hub/**, drizzle/**             | nuxthub            |
 
 ### Domain Agents
-| Agent | Model | Triggers |
-|-------|-------|----------|
-| auth-reviewer | opus | auth/**, middleware/**, session* |
-| db-reviewer | sonnet | schema/**, migrations/** |
-| a11y-reviewer | sonnet | *.vue (ARIA, keyboard) |
-| i18n-reviewer | haiku | locales/**, $t( |
+
+| Agent         | Model  | Triggers                          |
+| ------------- | ------ | --------------------------------- |
+| auth-reviewer | opus   | auth/**, middleware/**, session\* |
+| db-reviewer   | sonnet | schema/**, migrations/**          |
+| a11y-reviewer | sonnet | \*.vue (ARIA, keyboard)           |
+| i18n-reviewer | haiku  | locales/\*\*, $t(                 |
 
 ### Type & Quality
-| Agent | Model | Triggers |
-|-------|-------|----------|
-| typescript-reviewer | sonnet | *.ts (complex types) |
-| test-analyzer | haiku | *.test.*, __tests__/** |
-| perf-reviewer | sonnet | (orchestrator-triggered) |
+
+| Agent               | Model  | Triggers                 |
+| ------------------- | ------ | ------------------------ |
+| typescript-reviewer | sonnet | \*.ts (complex types)    |
+| test-analyzer       | haiku  | _.test._, **tests**/\*\* |
+| perf-reviewer       | sonnet | (orchestrator-triggered) |
 
 ### Infrastructure
-| Agent | Model | Triggers |
-|-------|-------|----------|
-| deps-reviewer | haiku | package.json, lockfiles |
-| config-reviewer | haiku | *.config.ts, .env* |
-| ci-reviewer | haiku | .github/**, Dockerfile |
+
+| Agent           | Model | Triggers                 |
+| --------------- | ----- | ------------------------ |
+| deps-reviewer   | haiku | package.json, lockfiles  |
+| config-reviewer | haiku | _.config.ts, .env_       |
+| ci-reviewer     | haiku | .github/\*\*, Dockerfile |
 
 ### Utility
-| Agent | Model | Purpose |
-|-------|-------|---------|
-| git-historian | haiku | Git blame, related PRs |
-| impact-analyzer | sonnet | Cross-file dependencies |
-| critic-agent | haiku | Validate findings before posting |
-| github-api | haiku | Post review via gh CLI |
-| repro-creator | sonnet | Create bug reproductions, push to ~/repros |
+
+| Agent           | Model  | Purpose                                    |
+| --------------- | ------ | ------------------------------------------ |
+| git-historian   | haiku  | Git blame, related PRs                     |
+| impact-analyzer | sonnet | Cross-file dependencies                    |
+| critic-agent    | haiku  | Validate findings before posting           |
+| github-api      | haiku  | Post review via gh CLI                     |
+| repro-creator   | sonnet | Create bug reproductions, push to ~/repros |
 
 ## Skills (shared resources)
 
 Skills downloaded on-demand based on agents spawned:
 
-| Skill | Used By |
-|-------|---------|
-| nuxt | nuxt-reviewer, api-reviewer, config-reviewer |
-| vue | vue-reviewer, a11y-reviewer |
-| nuxt-modules | nuxt-reviewer, api-reviewer |
-| nuxthub | nuxthub-reviewer, db-reviewer |
-| reka-ui | vue-reviewer, a11y-reviewer |
-| ts-library | typescript-reviewer, api-reviewer |
+| Skill        | Used By                                      |
+| ------------ | -------------------------------------------- |
+| nuxt         | nuxt-reviewer, api-reviewer, config-reviewer |
+| vue          | vue-reviewer, a11y-reviewer                  |
+| nuxt-modules | nuxt-reviewer, api-reviewer                  |
+| nuxthub      | nuxthub-reviewer, db-reviewer                |
+| reka-ui      | vue-reviewer, a11y-reviewer                  |
+| ts-library   | typescript-reviewer, api-reviewer            |
 
 ## Prompt Engineering (Anthropic Claude 4.x best practices)
 
@@ -114,6 +120,7 @@ Skills downloaded on-demand based on agents spawned:
 **Opus (security)**: No "think" → use "evaluate/assess". `<code_exploration>` + `<minimal_scope>` + Chain of Verification.
 
 All prompts:
+
 - `<task>` wrapper
 - `<output_format>` with confidence scores
 - Confidence >= 80 threshold

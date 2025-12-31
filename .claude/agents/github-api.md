@@ -11,6 +11,7 @@ You are a GitHub API integration agent. You handle all GitHub REST API operation
 **Available operations:**
 
 1. **Fetch PR details**
+
    ```bash
    curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
      -H "Accept: application/vnd.github.v3+json" \
@@ -18,6 +19,7 @@ You are a GitHub API integration agent. You handle all GitHub REST API operation
    ```
 
 2. **Fetch PR diff**
+
    ```bash
    curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
      -H "Accept: application/vnd.github.v3.diff" \
@@ -25,6 +27,7 @@ You are a GitHub API integration agent. You handle all GitHub REST API operation
    ```
 
 3. **Fetch PR files**
+
    ```bash
    curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
      -H "Accept: application/vnd.github.v3+json" \
@@ -32,6 +35,7 @@ You are a GitHub API integration agent. You handle all GitHub REST API operation
    ```
 
 4. **Post issue comment**
+
    ```bash
    curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
      -H "Accept: application/vnd.github.v3+json" \
@@ -50,6 +54,7 @@ You are a GitHub API integration agent. You handle all GitHub REST API operation
    ```
 
 **Environment variables:**
+
 - `GITHUB_TOKEN`: API authentication
 - `PR_OWNER`: Repository owner
 - `PR_REPO`: Repository name
@@ -57,6 +62,7 @@ You are a GitHub API integration agent. You handle all GitHub REST API operation
 
 **Suggestion format:**
 Use GitHub's native suggestion syntax:
+
 ```markdown
 Explanation of the issue
 
@@ -66,9 +72,11 @@ fixed code here
 ```
 
 **Link format:**
+
 ```
 https://github.com/OWNER/REPO/blob/FULL_SHA/path/file.ts#L10-L15
 ```
+
 - Must use FULL commit SHA (40 chars)
 - Line range format: `#L[start]-L[end]`
 - Include at least 1 line of context before/after

@@ -1,6 +1,7 @@
-import { z } from 'zod'
 import { consola } from 'consola'
+import { z } from 'zod'
 import { getValidatedConfig } from '../utils/config'
+import { getGitHubApp, isGitHubAppConfigured } from '../utils/github-app'
 
 const IssueCommentSchema = z.object({
   action: z.literal('created'),
@@ -16,15 +17,25 @@ const IssueCommentSchema = z.object({
     full_name: z.string(),
     clone_url: z.string(),
   }),
+  // GitHub App webhooks include installation
+  installation: z.object({ id: z.number() }).optional(),
 })
 
 export default defineEventHandler(async (event) => {
-  // 1. Validate HMAC signature
   const signature = getRequestHeader(event, 'x-hub-signature-256')
   const body = await readRawBody(event)
 
-  if (!validateWebhookSignature(body, signature)) {
-    throw createError({ statusCode: 401, message: 'Invalid webhook signature' })
+  // Validate signature - use GitHub App verification if configured, else HMAC fallback
+  if (isGitHubAppConfigured()) {
+    const app = getGitHubApp()
+    const isValid = await app.webhooks.verify(body!, signature!)
+    if (!isValid)
+      throw createError({ statusCode: 401, message: 'Invalid webhook signature' })
+  }
+  else {
+    if (!validateWebhookSignature(body, signature)) {
+      throw createError({ statusCode: 401, message: 'Invalid webhook signature' })
+    }
   }
 
   // 2. Check event type
@@ -68,6 +79,7 @@ export default defineEventHandler(async (event) => {
     repository: payload.repository,
     issue: payload.issue,
     comment: payload.comment,
+    installationId: payload.installation?.id,
   })
 
   return { status: 'queued', pr: payload.issue.number }

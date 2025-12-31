@@ -2,12 +2,18 @@
   "name": "pr-review-agent",
   "type": "module",
   "private": true,
+  "bin": {
+    "pr-review": "./cli/index.mjs"
+  },
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "nuxt typecheck"
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.0.76",
@@ -25,6 +31,7 @@
     "@antfu/eslint-config": "^6.7.3",
     "@types/node": "^25.0.3",
     "eslint": "^9.39.2",
+    "eslint-plugin-format": "^1.1.0",
     "typescript": "^5.9.3"
   }
 }

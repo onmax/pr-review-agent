@@ -963,7 +963,8 @@ export function getAgentsForFiles(files: string[]): string[] {
   // Check each file against agent triggers
   for (const file of files) {
     for (const [name, agent] of Object.entries(catalog)) {
-      if (!agent.triggers || agent.triggers.length === 0) continue
+      if (!agent.triggers || agent.triggers.length === 0)
+        continue
       for (const trigger of agent.triggers) {
         if (matchesTrigger(file, trigger)) {
           agentsToSpawn.add(name)
@@ -1019,4 +1020,3 @@ export function getSkillsForAgents(agentNames: string[]): string[] {
 
   return Array.from(skills)
 }
-
