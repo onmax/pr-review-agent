@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { consola } from 'consola'
 
 const IssueCommentSchema = z.object({
   action: z.literal('created'),
@@ -50,8 +51,14 @@ export default defineEventHandler(async (event) => {
     return { status: 'ignored', reason: 'not /review command' }
   }
 
-  // 6. Spawn review process
-  console.log(`[Webhook] Received /review for PR #${payload.issue.number} from @${payload.comment.user.login}`)
+  // 6. Filter: only allowed users
+  const allowedUsers = ['onmax']
+  if (!allowedUsers.includes(payload.comment.user.login)) {
+    return { status: 'ignored', reason: 'user not allowed' }
+  }
+
+  // 7. Spawn review process
+  consola.info(`Received /review for PR #${payload.issue.number} from @${payload.comment.user.login}`)
 
   spawnClaudeReview({
     repository: payload.repository,
