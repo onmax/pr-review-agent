@@ -1,16 +1,15 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'pathe'
 import { consola } from 'consola'
 import { ofetch } from 'ofetch'
 import { createIssueComment, parseRepoFullName } from './github'
 import { getValidatedConfig } from './config'
-import { getAgentsForFiles, getSkillsForAgents, getAgentCatalog } from './agents'
+import { getAgentsForFiles, getAgentCatalog } from './agents'
 
 const logger = consola.withTag('pr-review')
-
-const SKILLS_BASE_URL = 'https://raw.githubusercontent.com/onmax/nuxt-skills/main/skills'
+const SKILLS_URL = 'https://raw.githubusercontent.com/onmax/nuxt-skills/main/skills'
 
 export interface WebhookPayload {
   repository: { full_name: string, clone_url: string }
@@ -47,13 +46,9 @@ async function runReview(payload: WebhookPayload): Promise<void> {
     const agentsToSpawn = getAgentsForFiles(changedFiles)
     logger.info(`Spawning ${agentsToSpawn.length} agents: ${agentsToSpawn.join(', ')}`)
 
-    // Get skills needed for these agents
-    const skillsToDownload = getSkillsForAgents(agentsToSpawn)
-    logger.info(`Downloading ${skillsToDownload.length} skills: ${skillsToDownload.join(', ')}`)
+    await createIssueComment(owner, repo, prNumber, `🔍 Starting PR review with ${agentsToSpawn.length} agents...`)
 
-    await createIssueComment(owner, repo, prNumber, `🔍 Starting PR review with ${agentsToSpawn.length} agents... This may take a few minutes.`)
-
-    await downloadSkills(workDir, skillsToDownload)
+    await ensureSkills()
 
     const prompt = buildOrchestratorPrompt(owner, repo, prNumber, changedFiles, agentsToSpawn)
     const promptFile = join(workDir, '.review-prompt.txt')
@@ -75,7 +70,6 @@ async function runReview(payload: WebhookPayload): Promise<void> {
 }
 
 function getChangedFiles(workDir: string): string[] {
-  // Try main, then master, then HEAD~1
   for (const base of ['origin/main', 'origin/master', 'HEAD~1']) {
     try {
       const output = execFileSync('git', ['diff', '--name-only', base], { cwd: workDir, encoding: 'utf-8' })
@@ -86,27 +80,25 @@ function getChangedFiles(workDir: string): string[] {
   return []
 }
 
-async function downloadSkills(workDir: string, skills: string[]): Promise<void> {
-  if (skills.length === 0) {
-    logger.info('No skills to download')
-    return
-  }
+async function ensureSkills(): Promise<void> {
+  const skillsDir = join(homedir(), '.claude', 'skills')
+  const skills = ['nuxt', 'vue', 'nuxt-modules', 'nuxthub', 'reka-ui']
 
-  const skillsDir = join(workDir, '.claude', 'skills')
-  await mkdir(skillsDir, { recursive: true })
-
-  await Promise.all(skills.map(async (skill) => {
+  for (const skill of skills) {
+    const skillPath = join(skillsDir, skill, 'SKILL.md')
     try {
-      const content = await ofetch(`${SKILLS_BASE_URL}/${skill}/SKILL.md`, { responseType: 'text' })
-      const skillDir = join(skillsDir, skill)
-      await mkdir(skillDir, { recursive: true })
-      await writeFile(join(skillDir, 'SKILL.md'), content)
-      logger.info(`Downloaded skill: ${skill}`)
+      await import('node:fs/promises').then(fs => fs.access(skillPath))
     }
     catch {
-      logger.warn(`Failed to download skill: ${skill}`)
+      logger.info(`Downloading skill: ${skill}`)
+      try {
+        const content = await ofetch(`${SKILLS_URL}/${skill}/SKILL.md`, { responseType: 'text' })
+        await mkdir(join(skillsDir, skill), { recursive: true })
+        await writeFile(skillPath, content)
+      }
+      catch { logger.warn(`Failed to download: ${skill}`) }
     }
-  }))
+  }
 }
 
 function runClaudeCLI(cwd: string, promptFile: string, githubToken: string): Promise<string> {

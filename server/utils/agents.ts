@@ -11,18 +11,6 @@ export interface AgentDefinition {
   alwaysSpawn?: boolean // Always spawn regardless of file patterns
 }
 
-// Skill to agent mapping (skills are shared resources)
-export const SKILL_AGENTS_MAP: Record<string, string[]> = {
-  'nuxt': ['nuxt-reviewer', 'api-reviewer', 'config-reviewer', 'nuxthub-reviewer', 'auth-reviewer'],
-  'vue': ['vue-reviewer', 'a11y-reviewer'],
-  'nuxt-modules': ['nuxt-reviewer', 'api-reviewer'],
-  'nuxthub': ['nuxthub-reviewer', 'db-reviewer', 'api-reviewer'],
-  'reka-ui': ['vue-reviewer', 'a11y-reviewer'],
-  'ts-library': ['typescript-reviewer', 'api-reviewer'],
-  'nuxt-content': ['content-reviewer'],
-  'unocss-onmax': ['vue-reviewer'],
-}
-
 // Common prompt blocks (DRY)
 const CODE_EXPLORATION = `<code_exploration>
 ALWAYS read relevant files before reporting issues.
@@ -122,7 +110,7 @@ Attack vector: how this could be exploited
 Remediation: minimal fix
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: securityModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -158,7 +146,7 @@ Confidence: 0-100
 </output_format>
 
 Focus on actionable issues. Skip nitpicks and style preferences not in CLAUDE.md.`,
-      tools: ['Read', 'Grep', 'Glob'],
+      tools: ['Read', 'Grep', 'Glob', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -173,11 +161,15 @@ Focus on actionable issues. Skip nitpicks and style preferences not in CLAUDE.md
       triggers: ['nuxt.config.*', 'server/**', 'app/**', 'composables/**', 'plugins/**', 'middleware/**'],
       prompt: `<task>Review Nuxt 4+ patterns and best practices.</task>
 
+<skills>
+FIRST, invoke the Skill tool to load guidance:
+- Skill tool with skill: "nuxt" for Nuxt 4 patterns
+- Skill tool with skill: "nuxt-modules" if reviewing modules
+</skills>
+
 ${PARALLEL_TOOLS}
 ${CODE_EXPLORATION}
 ${CONTEXT_GATHERING}
-
-Use the nuxt skill for latest Nuxt 4 patterns.
 
 <checks>
 1. Server routes - proper h3 v1 helpers, validation with zod, error handling
@@ -198,7 +190,7 @@ Issue: what's wrong
 Suggestion: correct approach
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -209,11 +201,15 @@ Confidence: 0-100
       triggers: ['*.vue', 'components/**', 'layouts/**', 'pages/**'],
       prompt: `<task>Review Vue 3 Composition API patterns.</task>
 
+<skills>
+FIRST, invoke the Skill tool:
+- Skill tool with skill: "vue" for Vue 3.5+ patterns
+- Skill tool with skill: "reka-ui" if using headless components
+</skills>
+
 ${PARALLEL_TOOLS}
 ${CODE_EXPLORATION}
 ${CONTEXT_GATHERING}
-
-Use the vue skill for Vue 3.5+ patterns.
 
 <checks>
 1. Composition API - script setup, defineProps/defineEmits
@@ -234,7 +230,7 @@ Issue: what's wrong
 Suggestion: correct pattern
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob'],
+      tools: ['Read', 'Grep', 'Glob', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -267,7 +263,7 @@ Issue: specific problem
 Suggestion: h3 best practice
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -301,7 +297,7 @@ Issue: specific problem
 Suggestion: NuxtHub best practice
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -346,7 +342,7 @@ Attack scenario: how it could be exploited
 Remediation: secure implementation
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: securityModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -380,7 +376,7 @@ Impact: performance or data integrity concern
 Suggestion: correct approach
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -415,7 +411,7 @@ WCAG: guideline reference
 Suggestion: accessible implementation
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob'],
+      tools: ['Read', 'Grep', 'Glob', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -445,7 +441,7 @@ Issue: i18n problem
 Suggestion: proper approach
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob'],
+      tools: ['Read', 'Grep', 'Glob', 'Skill'],
       model: utilityModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -483,7 +479,7 @@ Issue: type safety problem
 Suggestion: better typing
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob'],
+      tools: ['Read', 'Grep', 'Glob', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -559,7 +555,7 @@ Confidence: 0-100
 </output_format>
 
 Focus on measurable impact. Skip micro-optimizations.`,
-      tools: ['Read', 'Grep', 'Glob'],
+      tools: ['Read', 'Grep', 'Glob', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -713,7 +709,7 @@ After: new behavior/signature
 Migration: how to update consumers
 Confidence: 0-100
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -777,7 +773,7 @@ ${CODE_EXPLORATION}
 ### Risk Areas
 [Parts of codebase that might be affected]
 </output_format>`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -840,7 +836,7 @@ Confidence: 0-100
 </output_format>
 
 Be selective. Only report risks likely to occur in production.`,
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
@@ -903,7 +899,7 @@ Execute the API call with the provided review content.`,
     },
 
     // ==========================================
-    // REPRODUCTION AGENT
+    // REPRODUCTION AGENT (standalone, not for PR reviews)
     // ==========================================
 
     'repro-creator': {
@@ -918,91 +914,31 @@ ALWAYS read ~/repros/CLAUDE.md first - it contains the full workflow and convent
 </first_step>
 
 <working_directory>
-All work happens in ~/repros. You have full Bash access to:
-- Run any command (pnpm, git, gh, etc.)
-- Create/edit files
-- Push to the repros repository
+All work happens in ~/repros. You have full Bash access to run any command.
 </working_directory>
 
 <workflow>
 ## Phase 1: Bug Reproduction
 1. Read ~/repros/CLAUDE.md for conventions
-2. Fetch the GitHub issue: \`gh issue view {url}\`
+2. Fetch issue: \`gh issue view {url}\`
 3. Create folder: \`{library}-{issue-number}\` in ~/repros
-4. Scaffold minimal project
-5. Add minimal code to reproduce the bug
-6. Create README.md (see template below)
-7. Verify the bug is reproducible
+4. Scaffold minimal project, add code to reproduce bug
+5. Create README.md, verify bug is reproducible
 
 ## Phase 2: Fixed Version
-1. Copy bug folder: \`cp -r {folder} {folder}-fixed\`
-2. cd into fixed folder
-3. Start patch: \`pnpm patch {package-name}\`
-4. Apply fix to the extracted package (path shown by pnpm patch)
-5. Commit patch: \`pnpm patch-commit '{extracted-path}'\`
-6. Verify the fix works
-7. Update README with ## Fix section
+1. Copy: \`cp -r {folder} {folder}-fixed\`
+2. \`pnpm patch {package}\` → apply fix → \`pnpm patch-commit '{path}'\`
+3. Verify fix, update README with ## Fix section
 
 ## Phase 3: Push
-1. git add both folders
-2. git commit -m "add {library}-{issue} repro"
-3. git push
-4. Return GitHub links
+git add both folders && git commit -m "add {library}-{issue} repro" && git push
 </workflow>
 
-<readme_template>
-# {library}-{issue-number}
-
-Issue: {github-issue-url}
-
-## Problem
-{Brief description}
-
-## Verify
-\`\`\`bash
-pnpm install && pnpm dev  # or pnpm build
-\`\`\`
-
-## Expected
-{What should happen}
-
-## Actual
-{What actually happens}
-</readme_template>
-
-<fixed_readme_addition>
-## Fix
-{Description of what the patch changes}
-
-Applied via \`pnpm patch {package}\`.
-</fixed_readme_addition>
-
 <output_format>
-## Reproduction Created
-
-**Bug folder**: \`{folder-name}\`
-**Fixed folder**: \`{folder-name}-fixed\`
-
-**GitHub**:
-- https://github.com/onmax/repros/tree/main/{folder-name}
-- https://github.com/onmax/repros/tree/main/{folder-name}-fixed
-
+**Bug**: https://github.com/onmax/repros/tree/main/{folder}
+**Fixed**: https://github.com/onmax/repros/tree/main/{folder}-fixed
 **Commit**: https://github.com/onmax/repros/commit/{SHA}
-
-### Verify bug
-\`\`\`bash
-git clone --depth 1 --filter=blob:none --sparse https://github.com/onmax/repros.git
-cd repros && git sparse-checkout set {folder-name}
-cd {folder-name} && pnpm install && {verify-command}
-\`\`\`
-
-### Verify fix
-\`\`\`bash
-cd ../{folder-name}-fixed && pnpm install && {verify-command}
-\`\`\`
-</output_format>
-
-Use skills (nuxt, vue, nuxthub) for correct patterns. Keep reproduction MINIMAL.`,
+</output_format>`,
       tools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebFetch'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
