@@ -1,0 +1,22 @@
+[Unit]
+Description=PR Review Agent - GitHub webhook + Claude Code
+After=network.target
+
+[Service]
+Type=simple
+User=srvx
+WorkingDirectory=/home/srvx/pr-review-agent
+EnvironmentFile=/home/srvx/pr-review-agent/.env
+ExecStart=/usr/bin/node .output/server/index.mjs
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target
