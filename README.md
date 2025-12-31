@@ -46,7 +46,7 @@ GitHub webhook (issue_comment with /review)
 | Node.js 22+ | [fnm](https://github.com/Schniz/fnm) (recommended) |
 | pnpm | [pnpm.io/installation](https://pnpm.io/installation) |
 | Claude Code CLI | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
-| GitHub PAT | [Create token](https://github.com/settings/tokens/new) (needs `repo` scope) |
+| GitHub Token | [Create fine-grained token](https://github.com/settings/personal-access-tokens/new) |
 
 ### 1. Clone and Install
 
@@ -68,9 +68,12 @@ Edit `.env` with your values:
 # Generate with: openssl rand -hex 20
 NUXT_GITHUB_WEBHOOK_SECRET=your_webhook_secret
 
-# GitHub PAT with 'repo' scope
-# https://github.com/settings/tokens/new
-NUXT_GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+# Fine-grained token with repository access:
+# - Contents: Read
+# - Issues: Read and write
+# - Pull requests: Read and write
+# https://github.com/settings/personal-access-tokens/new
+NUXT_GITHUB_TOKEN=github_pat_xxxxxxxxxxxx
 
 # Repos allowed to trigger reviews (comma-separated)
 NUXT_ALLOWED_REPOS=owner/repo1,owner/repo2
