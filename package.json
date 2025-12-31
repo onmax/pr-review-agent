@@ -11,7 +11,12 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.0.76",
+    "consola": "^3.4.2",
+    "giget": "^2.0.0",
     "nuxt": "^4.2.2",
+    "octokit": "^5.0.5",
+    "ofetch": "^1.5.1",
+    "pathe": "^2.0.3",
     "vue": "^3.5.26",
     "vue-router": "^4.6.4",
     "zod": "^4.3.2"
