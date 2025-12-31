@@ -41,37 +41,62 @@ GitHub webhook (issue_comment with /review)
 
 ### Prerequisites
 
-- Node.js 18+
-- Claude Code CLI authenticated (`claude login`)
-- GitHub Personal Access Token with repo access
-- GitHub webhook secret
+| Requirement | Link |
+|-------------|------|
+| Node.js 22+ | [fnm](https://github.com/Schniz/fnm) (recommended) |
+| pnpm | [pnpm.io/installation](https://pnpm.io/installation) |
+| Claude Code CLI | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
+| GitHub PAT | [Create token](https://github.com/settings/tokens/new) (needs `repo` scope) |
 
-### Installation
+### 1. Clone and Install
 
 ```bash
+git clone https://github.com/onmax/pr-review-agent.git
+cd pr-review-agent
 pnpm install
+```
+
+### 2. Configure Environment
+
+```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your secrets:
+Edit `.env` with your values:
 
 ```bash
+# Generate with: openssl rand -hex 20
 NUXT_GITHUB_WEBHOOK_SECRET=your_webhook_secret
-NUXT_GITHUB_TOKEN=ghp_your_token
+
+# GitHub PAT with 'repo' scope
+# https://github.com/settings/tokens/new
+NUXT_GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+
+# Repos allowed to trigger reviews (comma-separated)
+NUXT_ALLOWED_REPOS=owner/repo1,owner/repo2
 ```
 
-### GitHub Webhook Configuration
+### 3. Authenticate Claude CLI
 
-1. Go to your repository **Settings** → **Webhooks** → **Add webhook**
-2. Set **Payload URL** to your server endpoint (e.g., `https://your-server.com/webhook`)
+```bash
+claude login
+```
+
+Follow the browser prompts to authenticate with your Claude Code subscription.
+
+### 4. Configure GitHub Webhook
+
+For each repository in `NUXT_ALLOWED_REPOS`:
+
+1. Navigate to **Settings** → **Webhooks** → [**Add webhook**](https://docs.github.com/en/webhooks/using-webhooks/creating-webhooks)
+2. Set **Payload URL** to `http://your-server:3000/webhook`
 3. Set **Content type** to `application/json`
-4. Enter your **Secret**
-5. Select **Let me select individual events** → check **Issue comments**
-6. Save the webhook
+4. Enter the same **Secret** as `NUXT_GITHUB_WEBHOOK_SECRET`
+5. Under **Which events?**, select **Let me select individual events**
+6. Check only **Issue comments**
+7. Click **Add webhook**
 
 ## Development
-
-Start the development server:
 
 ```bash
 pnpm dev
@@ -79,46 +104,112 @@ pnpm dev
 
 The webhook endpoint is available at `http://localhost:3000/webhook`.
 
-## Sandboxing
+## Production Deployment
 
-Claude Code runs with native [bubblewrap](https://github.com/containers/bubblewrap) sandbox on Linux. This provides OS-level isolation:
-
-- Filesystem restrictions (only workdir accessible)
-- Network filtering
-- Process isolation
-- All child processes inherit sandbox
-
-### VPS Setup
-
-```bash
-# Install bubblewrap (required for sandbox)
-sudo apt install bubblewrap
-
-# Install Claude Code CLI
-npm install -g @anthropic-ai/claude-code
-
-# Authenticate Claude
-claude login
-```
-
-The agent uses `--dangerously-skip-permissions` but bubblewrap still enforces OS-level restrictions.
-
-## Deployment
-
-### Node.js Direct
+### Quick Start
 
 ```bash
 pnpm build
 node .output/server/index.mjs
 ```
 
-### Systemd Service
+### Systemd Service (Recommended)
+
+For production, run the agent as a dedicated service user with systemd.
+
+#### 1. Create Service User
 
 ```bash
-sudo cp systemd/pr-review.service /etc/systemd/system/
+sudo useradd -r -m -s /bin/bash srvx
+sudo -u srvx bash
+```
+
+#### 2. Install Dependencies (as srvx user)
+
+```bash
+# Install fnm (Node.js version manager)
+curl -fsSL https://fnm.vercel.app/install | bash
+source ~/.bashrc
+
+# Install Node.js and pnpm
+fnm install 22
+fnm use 22
+corepack enable
+corepack prepare pnpm@latest --activate
+
+# Install Claude CLI
+npm install -g @anthropic-ai/claude-code
+claude login
+```
+
+#### 3. Clone and Build
+
+```bash
+cd ~
+git clone https://github.com/onmax/pr-review-agent.git
+cd pr-review-agent
+pnpm install
+pnpm build
+cp .env.example .env
+# Edit .env with your secrets
+```
+
+#### 4. Create systemd Service
+
+Exit the srvx shell and create the service file:
+
+```bash
+exit
+
+sudo tee /etc/systemd/system/pr-review.service << 'EOF'
+[Unit]
+Description=PR Review Agent
+After=network.target
+
+[Service]
+Type=simple
+User=srvx
+WorkingDirectory=/home/srvx/pr-review-agent
+Environment=PATH=/home/srvx/.local/share/fnm/node-versions/v22.21.1/installation/bin:/usr/bin
+EnvironmentFile=/home/srvx/pr-review-agent/.env
+ExecStart=/home/srvx/.local/share/fnm/node-versions/v22.21.1/installation/bin/node .output/server/index.mjs
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+#### 5. Enable and Start
+
+```bash
+sudo systemctl daemon-reload
 sudo systemctl enable pr-review
 sudo systemctl start pr-review
 ```
+
+#### 6. View Logs
+
+```bash
+sudo journalctl -u pr-review -f
+```
+
+## Sandboxing
+
+Claude Code runs with native [bubblewrap](https://github.com/containers/bubblewrap) sandbox on Linux:
+
+- Filesystem restrictions (only workdir accessible)
+- Network filtering
+- Process isolation
+- All child processes inherit sandbox
+
+```bash
+# Install bubblewrap (Ubuntu/Debian)
+sudo apt install bubblewrap
+```
+
+The agent uses `--dangerously-skip-permissions` but bubblewrap enforces OS-level restrictions.
 
 ## Architecture
 
