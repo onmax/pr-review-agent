@@ -24,42 +24,100 @@ cp .env.example .env
 GitHub webhook (issue_comment)
          │
          ▼
-server/routes/webhook.post.ts (HMAC + /review filter)
+webhook.post.ts (HMAC + /review filter)
          │
          ▼
-Claude Agent SDK query() with 9 agents
+runReview() → analyze changed files
+         │
+         ├─ getAgentsForFiles(files) → dynamic agent selection
+         ├─ getSkillsForAgents(agents) → download only needed skills
          │
          ▼
-github-api agent posts review via REST API
+Claude Code CLI with orchestrator prompt
+         │
+         ├─ Spawns 3-15 agents in parallel based on file patterns
+         ├─ Aggregates findings, removes duplicates
+         ├─ critic-agent validates before posting
+         │
+         ▼
+gh CLI posts review comment
 ```
 
-## Agents
+## Agent Catalog (20+ agents)
 
-| Agent | Model Tier | Purpose |
-|-------|------------|---------|
-| git-validator | utility | Branch sanity check |
-| context-explorer | analysis | Git blame for small PRs |
-| security-reviewer | security | OWASP, secrets, auth |
-| code-quality | analysis | DRY, complexity |
-| test-analyzer | analysis | Run tests, coverage |
-| performance | analysis | N+1, memory, bundle |
-| documentation | utility | JSDoc, README |
-| drawbacks-analyzer | analysis | Edge cases, risks |
-| github-api | utility | POST review via API |
+Dynamic spawning based on file patterns. Skills shared across agents.
 
-## Prompt Engineering (per Anthropic Claude 4.x best practices)
+### Always Spawn
+| Agent | Model | Purpose |
+|-------|-------|---------|
+| security-reviewer | opus | OWASP, secrets, injection, auth |
+| code-quality | sonnet | DRY, complexity, CLAUDE.md |
 
-**Haiku (utility tier)**: Fast, direct prompts. XML tags for structure. Max 8000 output tokens.
+### Framework Agents (triggered by file patterns)
+| Agent | Model | Triggers | Skills |
+|-------|-------|----------|--------|
+| nuxt-reviewer | sonnet | nuxt.config, server/**, app/** | nuxt, nuxt-modules |
+| vue-reviewer | sonnet | *.vue, components/** | vue, reka-ui |
+| api-reviewer | sonnet | server/api/**, routes/** | nuxt, ts-library |
+| nuxthub-reviewer | sonnet | hub/**, drizzle/** | nuxthub |
 
-**Sonnet (analysis tier)**: Explicit `<parallel_tool_calls>` instructions. Multi-file context. `<investigation>` blocks for code exploration.
+### Domain Agents
+| Agent | Model | Triggers |
+|-------|-------|----------|
+| auth-reviewer | opus | auth/**, middleware/**, session* |
+| db-reviewer | sonnet | schema/**, migrations/** |
+| a11y-reviewer | sonnet | *.vue (ARIA, keyboard) |
+| i18n-reviewer | haiku | locales/**, $t( |
 
-**Opus (security tier)**: Avoid "think" → use "evaluate/consider/assess". Explicit `<code_exploration>` + `<minimal_scope>` to prevent overengineering. Thorough verification requirements.
+### Type & Quality
+| Agent | Model | Triggers |
+|-------|-------|----------|
+| typescript-reviewer | sonnet | *.ts (complex types) |
+| test-analyzer | haiku | *.test.*, __tests__/** |
+| perf-reviewer | sonnet | (orchestrator-triggered) |
 
-All prompts use:
-- `<task>` wrapper for main goal
-- `<output_format>` for structured results
+### Infrastructure
+| Agent | Model | Triggers |
+|-------|-------|----------|
+| deps-reviewer | haiku | package.json, lockfiles |
+| config-reviewer | haiku | *.config.ts, .env* |
+| ci-reviewer | haiku | .github/**, Dockerfile |
+
+### Utility
+| Agent | Model | Purpose |
+|-------|-------|---------|
+| git-historian | haiku | Git blame, related PRs |
+| impact-analyzer | sonnet | Cross-file dependencies |
+| critic-agent | haiku | Validate findings before posting |
+| github-api | haiku | Post review via gh CLI |
+| repro-creator | sonnet | Create bug reproductions, push to ~/repros |
+
+## Skills (shared resources)
+
+Skills downloaded on-demand based on agents spawned:
+
+| Skill | Used By |
+|-------|---------|
+| nuxt | nuxt-reviewer, api-reviewer, config-reviewer |
+| vue | vue-reviewer, a11y-reviewer |
+| nuxt-modules | nuxt-reviewer, api-reviewer |
+| nuxthub | nuxthub-reviewer, db-reviewer |
+| reka-ui | vue-reviewer, a11y-reviewer |
+| ts-library | typescript-reviewer, api-reviewer |
+
+## Prompt Engineering (Anthropic Claude 4.x best practices)
+
+**Haiku (utility)**: Fast, direct. XML tags.
+
+**Sonnet (analysis)**: `<parallel_tool_calls>`. Multi-file context.
+
+**Opus (security)**: No "think" → use "evaluate/assess". `<code_exploration>` + `<minimal_scope>` + Chain of Verification.
+
+All prompts:
+- `<task>` wrapper
+- `<output_format>` with confidence scores
 - Confidence >= 80 threshold
-- Tell what TO DO (not what NOT to do)
+- `<context_gathering>` for autonomous investigation
 
 ## Development
 
@@ -73,8 +131,6 @@ pnpm dev
 pnpm build
 node .output/server/index.mjs
 ```
-
-Or with systemd: see `systemd/pr-review.service`
 
 ## Trigger
 

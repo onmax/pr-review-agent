@@ -6,158 +6,136 @@ export interface AgentDefinition {
   prompt: string
   tools?: string[]
   model?: 'haiku' | 'sonnet' | 'opus'
+  skills?: string[] // Skills this agent should use
+  triggers?: string[] // File patterns that trigger this agent
+  alwaysSpawn?: boolean // Always spawn regardless of file patterns
 }
 
+// Skill to agent mapping (skills are shared resources)
+export const SKILL_AGENTS_MAP: Record<string, string[]> = {
+  'nuxt': ['nuxt-reviewer', 'api-reviewer', 'config-reviewer', 'nuxthub-reviewer', 'auth-reviewer'],
+  'vue': ['vue-reviewer', 'a11y-reviewer'],
+  'nuxt-modules': ['nuxt-reviewer', 'api-reviewer'],
+  'nuxthub': ['nuxthub-reviewer', 'db-reviewer', 'api-reviewer'],
+  'reka-ui': ['vue-reviewer', 'a11y-reviewer'],
+  'ts-library': ['typescript-reviewer', 'api-reviewer'],
+  'nuxt-content': ['content-reviewer'],
+  'unocss-onmax': ['vue-reviewer'],
+}
+
+// Common prompt blocks (DRY)
+const CODE_EXPLORATION = `<code_exploration>
+ALWAYS read relevant files before reporting issues.
+Do not speculate about code you haven't inspected.
+Use Read, Grep, Glob tools to investigate thoroughly.
+Verify each finding by examining the actual code path.
+</code_exploration>`
+
+const MINIMAL_SCOPE = `<minimal_scope>
+Only report issues demonstrably present in the code.
+Avoid theoretical vulnerabilities without evidence.
+Each finding must cite specific file:line evidence.
+Focus on the PR changes - do not audit the entire codebase.
+</minimal_scope>`
+
+const CONTEXT_GATHERING = `<context_gathering>
+If you need more context for confident assessment:
+- Use Grep to find related code patterns
+- Use Read to inspect imported modules
+- Use Bash with git blame to understand history
+- Use Bash with git log to find related commits
+Do NOT report low-confidence findings. Investigate first.
+</context_gathering>`
+
+const PARALLEL_TOOLS = `<parallel_tool_calls>
+Call multiple tools simultaneously for efficiency:
+- Read multiple files in parallel
+- Run independent searches in parallel
+</parallel_tool_calls>`
+
+const OUTPUT_THRESHOLD = `<confidence>Only report findings with confidence >= 80.</confidence>`
+
 /**
- * Agent definitions optimized per Anthropic's Claude 4.x prompt engineering best practices.
- * - Haiku (utility): Fast, direct prompts. No extended thinking. Max 8000 tokens.
- * - Sonnet (analysis): Balanced. Explicit parallel tool calling. Multi-file context.
- * - Opus (security): Deep reasoning. Avoid "think" → use "evaluate/consider/assess".
- *   Explicit code exploration instructions. Minimal solution guidance.
+ * Complete agent catalog with 20+ specialized agents.
+ * Agents are dynamically spawned based on PR file patterns.
+ * Skills are shared - multiple agents can use the same skills.
+ *
+ * Model tiers per Anthropic best practices:
+ * - Haiku (utility): Fast, direct, simple validation
+ * - Sonnet (analysis): Multi-file context, parallel tools
+ * - Opus (security): Deep reasoning, avoid "think", use "evaluate/assess"
  */
-export function getReviewAgents(): Record<string, AgentDefinition> {
+export function getAgentCatalog(): Record<string, AgentDefinition> {
   const securityModel = getModelForAgent('security')
   const analysisModel = getModelForAgent('analysis')
   const utilityModel = getModelForAgent('utility')
 
   return {
-    // UTILITY TIER (Haiku) - Fast, direct, simple tasks
-    'git-validator': {
-      description: 'Validates git state and PR branch sanity before review. Use first.',
-      prompt: `<task>Validate git state for PR review.</task>
+    // ==========================================
+    // ALWAYS SPAWN (core review agents)
+    // ==========================================
 
-<checks>
-1. Run git status - confirm no conflicts or dirty state
-2. Verify branch exists and is checked out
-3. Compute diff stats: git diff --stat HEAD~1
-</checks>
+    'security-reviewer': {
+      description: 'Security audit - OWASP, secrets, injection, auth. Uses Opus for deep analysis.',
+      alwaysSpawn: true,
+      skills: [],
+      triggers: [],
+      prompt: `<task>Expert security audit of code changes.</task>
+
+${CODE_EXPLORATION}
+${MINIMAL_SCOPE}
+${CONTEXT_GATHERING}
+
+<vulnerability_categories>
+Evaluate for:
+1. Hardcoded secrets/credentials - API keys, passwords, tokens in source
+2. Injection vulnerabilities - SQL, command, template, XSS
+3. Authentication gaps - missing auth checks, broken access control
+4. Data exposure - sensitive data in logs, error messages, responses
+5. Cryptographic issues - weak algorithms, improper key handling
+6. SSRF/path traversal - unvalidated URLs or file paths
+</vulnerability_categories>
+
+<verification>
+After initial findings, verify each claim:
+- "Is this actually exploitable? Read the full code path."
+- Check if input validation exists elsewhere
+- Verify the vulnerability is reachable from user input
+Filter findings that can't be verified.
+</verification>
+
+<severity_assessment>
+Rate each finding:
+- CRITICAL: Direct exploitation path, high impact
+- HIGH: Exploitable with some conditions
+- MEDIUM: Defense-in-depth issue
+- LOW: Minor security hygiene
+</severity_assessment>
 
 <output_format>
-Return JSON only:
-{ "valid": boolean, "issues": string[], "stats": { "files": number, "additions": number, "deletions": number, "size": "small"|"medium"|"large" } }
+${OUTPUT_THRESHOLD}
 
-Size thresholds: small < 200 lines, medium 200-500, large > 500
-</output_format>
-
-Execute checks now and return the JSON result.`,
-      tools: ['Bash'],
-      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
-    },
-
-    'documentation': {
-      description: 'Documentation gaps - JSDoc, README updates.',
-      prompt: `<task>Quick documentation scan for gaps.</task>
-
-<checks>
-1. Exported functions/classes missing JSDoc
-2. README needs update for new features
-3. Complex code lacking explanatory comments
-4. Breaking changes need CHANGELOG entry
-</checks>
-
-<output_format>
-Only report issues with confidence >= 80:
-
-[DOCS] Issue title
+[SEVERITY] Vulnerability title
 File: path:line
-Function/area: name
-Gap: what's missing
-Suggestion: specific fix
+Evidence: specific code pattern found
+Attack vector: how this could be exploited
+Remediation: minimal fix
 Confidence: 0-100
-</output_format>
-
-Quick pass only. Do not over-report minor gaps.`,
-      tools: ['Read', 'Glob'],
-      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
-    },
-
-    'github-api': {
-      description: 'Posts review results via GitHub REST API.',
-      prompt: `<task>Post PR review comment via GitHub REST API.</task>
-
-<environment>
-Use these env vars:
-- GITHUB_TOKEN: Bearer token for auth
-- PR_OWNER: Repository owner
-- PR_REPO: Repository name
-- PR_NUMBER: Pull request number
-</environment>
-
-<api_call>
-curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \\
-  -H "Accept: application/vnd.github.v3+json" \\
-  "https://api.github.com/repos/$PR_OWNER/$PR_REPO/issues/$PR_NUMBER/comments" \\
-  -d '{"body": "COMMENT_BODY"}'
-</api_call>
-
-<link_format>
-Always use full SHA in code links:
-https://github.com/OWNER/REPO/blob/FULL_SHA/path#L10-L15
-</link_format>
-
-<suggestion_syntax>
-For inline code suggestions use:
-\`\`\`suggestion
-fixed code here
-\`\`\`
-</suggestion_syntax>
-
-Execute the API call with the provided review content.`,
-      tools: ['Bash'],
-      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
-    },
-
-    // ANALYSIS TIER (Sonnet) - Multi-file context, parallel tools
-    'context-explorer': {
-      description: 'Git blame and historical context for small PRs (< 500 lines). Skip for large PRs.',
-      prompt: `<task>Gather git history context for small PRs.</task>
-
-<parallel_tool_calls>
-Call multiple tools simultaneously for efficiency:
-- Read multiple files in parallel
-- Run independent git commands in parallel
-</parallel_tool_calls>
-
-<investigation>
-1. Run git blame on modified files - identify recent authors and change patterns
-2. Search related commits from last 30 days: git log --oneline --since="30 days ago"
-3. Extract issue/PR references from commit messages (#123 patterns)
-4. Locate CLAUDE.md files in root and modified directories
-</investigation>
-
-<output_format>
-Return structured context summary:
-
-## Historical Context
-- Recent authors: [names]
-- Related commits: [refs with summaries]
-- Linked issues/PRs: [#refs]
-
-## CLAUDE.md Guidelines
-[Relevant guidelines if found]
-
-## Patterns Observed
-[Codebase conventions from history]
-</output_format>
-
-Skip entirely if PR > 500 lines changed. Output "SKIPPED: Large PR" in that case.`,
-      tools: ['Bash', 'Read', 'Grep'],
-      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      model: securityModel as 'haiku' | 'sonnet' | 'opus',
     },
 
     'code-quality': {
       description: 'Code quality - readability, DRY, complexity, CLAUDE.md compliance.',
+      alwaysSpawn: true,
+      skills: [],
+      triggers: [],
       prompt: `<task>Review code quality and CLAUDE.md compliance.</task>
 
-<parallel_tool_calls>
-Read multiple modified files in parallel to build context faster.
-Use Grep to search patterns across files simultaneously.
-</parallel_tool_calls>
-
-<investigation>
-ALWAYS read and understand relevant files before reporting issues.
-Do not speculate about code you have not inspected.
-</investigation>
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+${CONTEXT_GATHERING}
 
 <checks>
 1. CLAUDE.md compliance - verify specific guideline violations, quote the guideline
@@ -169,7 +147,7 @@ Do not speculate about code you have not inspected.
 </checks>
 
 <output_format>
-Only report confidence >= 80:
+${OUTPUT_THRESHOLD}
 
 [QUALITY] Issue title
 File: path:line
@@ -184,16 +162,342 @@ Focus on actionable issues. Skip nitpicks and style preferences not in CLAUDE.md
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
+    // ==========================================
+    // FRAMEWORK AGENTS (spawn based on file patterns)
+    // ==========================================
+
+    'nuxt-reviewer': {
+      description: 'Nuxt 4+ patterns - server routes, composables, runtimeConfig, h3.',
+      alwaysSpawn: false,
+      skills: ['nuxt', 'nuxt-modules'],
+      triggers: ['nuxt.config.*', 'server/**', 'app/**', 'composables/**', 'plugins/**', 'middleware/**'],
+      prompt: `<task>Review Nuxt 4+ patterns and best practices.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+${CONTEXT_GATHERING}
+
+Use the nuxt skill for latest Nuxt 4 patterns.
+
+<checks>
+1. Server routes - proper h3 v1 helpers, validation with zod, error handling
+2. Composables - proper use, reactivity patterns, SSR safety
+3. runtimeConfig - secrets in private, public for client-side
+4. Middleware - auth patterns, redirect handling
+5. Plugins - proper initialization, provide/inject
+6. Auto-imports - verify imports resolve correctly
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[NUXT] Issue title
+File: path:line
+Pattern: what should be used
+Issue: what's wrong
+Suggestion: correct approach
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'vue-reviewer': {
+      description: 'Vue 3 patterns - Composition API, props/emits, reactivity.',
+      alwaysSpawn: false,
+      skills: ['vue', 'reka-ui'],
+      triggers: ['*.vue', 'components/**', 'layouts/**', 'pages/**'],
+      prompt: `<task>Review Vue 3 Composition API patterns.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+${CONTEXT_GATHERING}
+
+Use the vue skill for Vue 3.5+ patterns.
+
+<checks>
+1. Composition API - script setup, defineProps/defineEmits
+2. Reactivity - ref vs reactive, computed usage, watchEffect
+3. Props/emits - proper typing, validation
+4. Component design - single responsibility, prop drilling
+5. Template patterns - v-bind, v-on, slots
+6. VueUse composables - proper usage
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[VUE] Issue title
+File: path:line
+Pattern: expected approach
+Issue: what's wrong
+Suggestion: correct pattern
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'api-reviewer': {
+      description: 'API routes - h3 helpers, validation, error handling.',
+      alwaysSpawn: false,
+      skills: ['nuxt', 'nuxt-modules', 'ts-library'],
+      triggers: ['server/api/**', 'server/routes/**', 'routes/**'],
+      prompt: `<task>Review API route implementation.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+${CONTEXT_GATHERING}
+
+<checks>
+1. h3 v1 helpers - readBody, getQuery, getRouterParam with validation
+2. Input validation - zod schemas, type safety
+3. Error handling - createError, proper status codes
+4. Response format - consistent structure
+5. Authentication - middleware usage
+6. Rate limiting considerations
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[API] Issue title
+File: path:line
+Issue: specific problem
+Suggestion: h3 best practice
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'nuxthub-reviewer': {
+      description: 'NuxtHub patterns - database, KV, blob storage.',
+      alwaysSpawn: false,
+      skills: ['nuxthub', 'nuxt'],
+      triggers: ['**/hub/**', '**/*hub*', '**/useKV*', '**/useBlob*', '**/useDrizzle*', 'drizzle/**'],
+      prompt: `<task>Review NuxtHub v0.10+ patterns.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+${CONTEXT_GATHERING}
+
+Use the nuxthub skill for latest patterns.
+
+<checks>
+1. Database - Drizzle ORM, proper schema, migrations
+2. KV storage - proper key patterns, TTL usage
+3. Blob storage - file handling, content types
+4. Cache API usage
+5. Multi-cloud deployment considerations
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[NUXTHUB] Issue title
+File: path:line
+Issue: specific problem
+Suggestion: NuxtHub best practice
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    // ==========================================
+    // DOMAIN AGENTS (spawn for specific concerns)
+    // ==========================================
+
+    'auth-reviewer': {
+      description: 'Authentication & authorization - sessions, middleware, access control.',
+      alwaysSpawn: false,
+      skills: ['nuxt'],
+      triggers: ['**/auth/**', '**/middleware/**', '**/session*', '**/login*', '**/oauth*'],
+      prompt: `<task>Deep review of authentication and authorization.</task>
+
+${CODE_EXPLORATION}
+${MINIMAL_SCOPE}
+${CONTEXT_GATHERING}
+
+<checks>
+1. Session handling - secure cookies, expiration, regeneration
+2. Middleware - auth checks on protected routes
+3. Access control - role-based, resource ownership
+4. OAuth flows - token handling, PKCE, state parameter
+5. Password handling - hashing, comparison timing attacks
+6. CSRF protection
+</checks>
+
+<verification>
+Evaluate each potential auth issue:
+- Is the vulnerability actually reachable?
+- Are there other defenses in place?
+- What's the actual attack scenario?
+</verification>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[AUTH] Issue title
+File: path:line
+Issue: specific auth problem
+Attack scenario: how it could be exploited
+Remediation: secure implementation
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      model: securityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'db-reviewer': {
+      description: 'Database patterns - schema, migrations, queries, Drizzle ORM.',
+      alwaysSpawn: false,
+      skills: ['nuxthub'],
+      triggers: ['**/schema/**', '**/drizzle/**', '**/migrations/**', '**/*.schema.ts', '**/db/**'],
+      prompt: `<task>Review database schema and query patterns.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+${CONTEXT_GATHERING}
+
+<checks>
+1. Schema design - normalization, indexes, constraints
+2. Migrations - reversibility, data safety
+3. Query patterns - N+1, missing indexes, SQL injection risk
+4. Drizzle ORM - proper usage, type safety
+5. Transaction handling - atomicity, error rollback
+6. Connection management
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[DB] Issue title
+File: path:line
+Issue: schema/query problem
+Impact: performance or data integrity concern
+Suggestion: correct approach
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'a11y-reviewer': {
+      description: 'Accessibility - ARIA, semantic HTML, keyboard navigation.',
+      alwaysSpawn: false,
+      skills: ['vue', 'reka-ui'],
+      triggers: ['*.vue', 'components/**'],
+      prompt: `<task>Review accessibility patterns.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+
+Use reka-ui skill for headless component patterns.
+
+<checks>
+1. Semantic HTML - proper heading hierarchy, landmarks
+2. ARIA attributes - roles, labels, descriptions
+3. Keyboard navigation - focus management, tab order
+4. Screen reader - alt text, announcements
+5. Color contrast considerations
+6. Reka UI - proper composition patterns
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[A11Y] Issue title
+File: path:line
+Issue: accessibility problem
+WCAG: guideline reference
+Suggestion: accessible implementation
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'i18n-reviewer': {
+      description: 'Internationalization - translations, locale handling.',
+      alwaysSpawn: false,
+      skills: ['nuxt'],
+      triggers: ['**/locales/**', '**/*i18n*', '**/$t('],
+      prompt: `<task>Review i18n patterns.</task>
+
+${CODE_EXPLORATION}
+
+<checks>
+1. Hardcoded strings - should use $t()
+2. Missing translations - keys without values
+3. Locale handling - proper detection, switching
+4. Pluralization - proper handling
+5. Date/number formatting - locale-aware
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[I18N] Issue title
+File: path:line
+Issue: i18n problem
+Suggestion: proper approach
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    // ==========================================
+    // TYPE & QUALITY AGENTS
+    // ==========================================
+
+    'typescript-reviewer': {
+      description: 'TypeScript - complex types, generics, type safety.',
+      alwaysSpawn: false,
+      skills: ['ts-library'],
+      triggers: ['*.ts', '*.tsx', '!*.d.ts'],
+      prompt: `<task>Review TypeScript patterns and type safety.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+
+Use ts-library skill for advanced patterns.
+
+<checks>
+1. Type safety - avoid any, unknown when possible
+2. Generics - proper constraints, inference
+3. Utility types - Pick, Omit, Partial usage
+4. Type narrowing - proper guards
+5. Declaration files - accurate exports
+6. Inference - let TypeScript infer when clear
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[TS] Issue title
+File: path:line
+Issue: type safety problem
+Suggestion: better typing
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
     'test-analyzer': {
-      description: 'Runs tests and analyzes coverage. ALWAYS runs tests.',
+      description: 'Test execution and coverage analysis.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: ['*.test.*', '*.spec.*', '__tests__/**', 'test/**', 'tests/**'],
       prompt: `<task>Run tests and analyze results. NEVER skip running tests.</task>
 
-<parallel_tool_calls>
-Execute test discovery and file reads in parallel when possible.
-</parallel_tool_calls>
+${PARALLEL_TOOLS}
 
 <execution>
-1. Detect test runner from package.json (vitest, jest, mocha, etc.)
+1. Detect test runner from package.json (vitest, jest, mocha)
 2. Run tests: pnpm test (or detected runner)
 3. Capture full output including failures and coverage
 4. Analyze failures for root causes
@@ -220,21 +524,19 @@ For new/modified code lacking tests:
 
 Tests are mandatory. Report test run status even if all pass.`,
       tools: ['Bash', 'Read', 'Glob'],
-      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
     },
 
-    'performance': {
-      description: 'Performance issues - N+1, memory leaks, bundle size.',
-      prompt: `<task>Analyze performance implications of changes.</task>
+    'perf-reviewer': {
+      description: 'Performance - N+1, memory, bundle size, render.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: [], // Spawned by orchestrator based on code analysis
+      prompt: `<task>Analyze performance implications.</task>
 
-<parallel_tool_calls>
-Read multiple files simultaneously to understand data flow patterns.
-</parallel_tool_calls>
-
-<investigation>
-ALWAYS inspect the actual code before reporting performance issues.
-Verify patterns exist - do not speculate.
-</investigation>
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+${CONTEXT_GATHERING}
 
 <checks>
 1. N+1 queries - DB/API calls inside loops, missing batching
@@ -245,7 +547,7 @@ Verify patterns exist - do not speculate.
 </checks>
 
 <output_format>
-Only report measurable impact, confidence >= 80:
+${OUTPUT_THRESHOLD}
 
 [PERF] Issue title
 File: path:line
@@ -256,36 +558,284 @@ Fix: minimal solution
 Confidence: 0-100
 </output_format>
 
-Focus on issues with real-world impact. Skip micro-optimizations.`,
+Focus on measurable impact. Skip micro-optimizations.`,
       tools: ['Read', 'Grep', 'Glob'],
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
-    'drawbacks-analyzer': {
-      description: 'Edge cases, risks, potential regressions.',
-      prompt: `<task>Adversarial analysis of what could go wrong.</task>
+    // ==========================================
+    // INFRASTRUCTURE AGENTS
+    // ==========================================
 
-<parallel_tool_calls>
-Read related files in parallel to understand dependencies and impact.
-</parallel_tool_calls>
+    'deps-reviewer': {
+      description: 'Dependency changes - package.json, lockfile updates.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: ['package.json', 'pnpm-lock.yaml', 'yarn.lock', 'package-lock.json'],
+      prompt: `<task>Review dependency changes.</task>
+
+<checks>
+1. New dependencies - necessity, bundle size, maintenance status
+2. Version bumps - breaking changes, changelog review
+3. Security - known vulnerabilities (check npm audit if possible)
+4. Duplicate dependencies
+5. Dev vs prod placement
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[DEPS] Issue title
+Package: name@version
+Issue: concern about the dependency
+Suggestion: alternative or action
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Bash', 'Grep'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'config-reviewer': {
+      description: 'Configuration files - nuxt.config, tsconfig, env.',
+      alwaysSpawn: false,
+      skills: ['nuxt'],
+      triggers: ['*.config.ts', '*.config.js', 'tsconfig.json', '.env*', '!.env.example'],
+      prompt: `<task>Review configuration changes.</task>
+
+${CODE_EXPLORATION}
+
+<checks>
+1. Security - no secrets in config (should be in env)
+2. Correctness - valid options, no deprecated settings
+3. Compatibility - Node version, browser targets
+4. Performance - build optimization settings
+5. Environment handling - proper .env usage
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[CONFIG] Issue title
+File: path
+Issue: configuration problem
+Suggestion: correct setting
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Glob', 'Grep'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'ci-reviewer': {
+      description: 'CI/CD - GitHub Actions, Dockerfile.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: ['.github/**', 'Dockerfile*', 'docker-compose*', '.gitlab-ci*'],
+      prompt: `<task>Review CI/CD configuration.</task>
+
+<checks>
+1. Security - no secrets in workflows, proper permissions
+2. Efficiency - caching, parallelization
+3. Reliability - proper failure handling
+4. Docker - multi-stage builds, minimal images
+5. Environment - proper secret handling
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[CI] Issue title
+File: path
+Issue: CI/CD problem
+Suggestion: better approach
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Glob'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    // ==========================================
+    // DOCUMENTATION AGENTS
+    // ==========================================
+
+    'doc-checker': {
+      description: 'Documentation - README, CHANGELOG, JSDoc.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: ['README*', 'CHANGELOG*', 'docs/**', '*.md'],
+      prompt: `<task>Quick documentation review.</task>
+
+<checks>
+1. README updates - new features documented
+2. CHANGELOG - breaking changes noted
+3. JSDoc - exported functions documented
+4. Code comments - complex logic explained
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[DOCS] Issue title
+File: path
+Gap: what's missing
+Suggestion: what to add
+Confidence: 0-100
+</output_format>
+
+Quick pass only. Do not over-report minor gaps.`,
+      tools: ['Read', 'Glob'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'breaking-change': {
+      description: 'Breaking changes - public API, exports.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: [], // Spawned by orchestrator based on export changes
+      prompt: `<task>Identify breaking changes.</task>
+
+${CODE_EXPLORATION}
+
+<checks>
+1. Export changes - removed, renamed
+2. Function signatures - parameter changes
+3. Type changes - stricter or different types
+4. Behavior changes - different return values
+5. Default value changes
+</checks>
+
+<output_format>
+${OUTPUT_THRESHOLD}
+
+[BREAKING] Change description
+File: path:line
+Before: previous behavior/signature
+After: new behavior/signature
+Migration: how to update consumers
+Confidence: 0-100
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    // ==========================================
+    // HISTORY & CONTEXT AGENTS
+    // ==========================================
+
+    'git-historian': {
+      description: 'Git history - blame, related PRs, patterns.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: [], // Available on demand
+      prompt: `<task>Gather git history context.</task>
+
+<investigation>
+1. Run git blame on modified files - identify recent authors
+2. Search related commits from last 30 days
+3. Extract issue/PR references from commit messages
+4. Identify patterns in the codebase
+</investigation>
+
+<output_format>
+## Historical Context
+- Recent authors: [names]
+- Related commits: [refs with summaries]
+- Linked issues/PRs: [#refs]
+
+## Patterns Observed
+[Codebase conventions from history]
+</output_format>`,
+      tools: ['Bash', 'Read', 'Grep'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'impact-analyzer': {
+      description: 'Cross-file impact analysis.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: [], // Spawned for larger PRs
+      prompt: `<task>Analyze cross-file dependencies and impact.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
 
 <analysis>
-Evaluate adversarially - consider failure modes:
-1. Edge cases - empty inputs, null, unicode, boundary values, negative numbers
-2. Regression risks - changes that could break existing behavior
-3. Compatibility - browser, Node version, dependency conflicts
-4. Scale issues - behavior with 1000x data volume
-5. Failure modes - network errors, timeouts, partial failures, recovery
+1. Find all imports of modified files
+2. Identify callers of changed functions
+3. Check for type dependencies
+4. Map the blast radius of changes
 </analysis>
 
 <output_format>
-Only report real risks, confidence >= 80:
+## Impact Analysis
+
+### Files Affected
+- path: description of impact
+
+### Dependency Chain
+[Visualization of dependencies]
+
+### Risk Areas
+[Parts of codebase that might be affected]
+</output_format>`,
+      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    // ==========================================
+    // UTILITY AGENTS
+    // ==========================================
+
+    'git-validator': {
+      description: 'Git state validation - branch sanity, diff stats.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: [],
+      prompt: `<task>Validate git state for PR review.</task>
+
+<checks>
+1. Run git status - confirm no conflicts
+2. Verify branch exists and is checked out
+3. Compute diff stats: git diff --stat HEAD~1
+</checks>
+
+<output_format>
+Return JSON only:
+{ "valid": boolean, "issues": string[], "stats": { "files": number, "additions": number, "deletions": number, "size": "small"|"medium"|"large" } }
+
+Size thresholds: small < 200 lines, medium 200-500, large > 500
+</output_format>`,
+      tools: ['Bash'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    'drawbacks-analyzer': {
+      description: 'Edge cases, risks, potential regressions.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: [], // Spawned for medium/large PRs
+      prompt: `<task>Adversarial analysis of what could go wrong.</task>
+
+${PARALLEL_TOOLS}
+${CODE_EXPLORATION}
+${CONTEXT_GATHERING}
+
+<analysis>
+Evaluate adversarially - consider failure modes:
+1. Edge cases - empty, null, unicode, boundaries, negative
+2. Regression risks - changes that could break existing behavior
+3. Compatibility - browser, Node version, dependencies
+4. Scale issues - behavior with 1000x data
+5. Failure modes - network, timeouts, partial failures
+</analysis>
+
+<output_format>
+${OUTPUT_THRESHOLD}
 
 [RISK] Issue title
 File: path:line
 Scenario: specific trigger condition
 Impact: what breaks
-Suggestion: minimal mitigation
+Mitigation: minimal fix
 Confidence: 0-100
 </output_format>
 
@@ -294,56 +844,243 @@ Be selective. Only report risks likely to occur in production.`,
       model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
 
-    // SECURITY TIER (Opus) - Deep reasoning, explicit exploration
-    'security-reviewer': {
-      description: 'Security audit - OWASP, secrets, injection, auth issues.',
-      prompt: `<task>Expert security audit of code changes.</task>
+    'critic-agent': {
+      description: 'Meta-reviewer - validates other agents findings before posting.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: [],
+      prompt: `<task>Review and validate aggregated findings before posting.</task>
 
-<code_exploration>
-ALWAYS read and understand relevant files before reporting vulnerabilities.
-Do not speculate about code you have not inspected.
-Be rigorous and persistent in searching for security issues.
-Verify each finding by examining the actual code path.
-</code_exploration>
+<checks>
+For each finding:
+1. Evidence cited? - must have file:line reference
+2. Actionable? - must have clear fix suggestion
+3. Verified? - finding based on actual code inspection
+4. Not a nitpick? - has real impact
+5. Not duplicate? - not reported by another agent
+</checks>
 
-<minimal_scope>
-Avoid over-engineering findings. Report only verified vulnerabilities.
-Focus on the specific changes - do not audit the entire codebase.
-Each finding must have clear evidence from the code you inspected.
-</minimal_scope>
-
-<vulnerability_categories>
-Evaluate for:
-1. Hardcoded secrets/credentials - API keys, passwords, tokens in source
-2. Injection vulnerabilities - SQL, command, template, XSS
-3. Authentication gaps - missing auth checks, broken access control
-4. Data exposure - sensitive data in logs, error messages, responses
-5. Cryptographic issues - weak algorithms, improper key handling
-6. SSRF/path traversal - unvalidated URLs or file paths
-</vulnerability_categories>
-
-<severity_assessment>
-Rate each finding:
-- CRITICAL: Direct exploitation path, high impact
-- HIGH: Exploitable with some conditions
-- MEDIUM: Defense-in-depth issue
-- LOW: Minor security hygiene
-</severity_assessment>
+<actions>
+- KEEP: findings that pass all checks
+- REMOVE: duplicates, nitpicks, unverified claims
+- IMPROVE: add missing line numbers or clarify vague suggestions
+</actions>
 
 <output_format>
-Only report findings with confidence >= 80:
+Return cleaned findings list with duplicates removed and quality improved.
+</output_format>`,
+      tools: ['Read'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
 
-[SEVERITY] Vulnerability title
-File: path:line
-Evidence: specific code pattern found
-Attack vector: how this could be exploited
-Remediation: minimal fix
-Confidence: 0-100
+    'github-api': {
+      description: 'Posts review results via GitHub REST API.',
+      alwaysSpawn: false,
+      skills: [],
+      triggers: [],
+      prompt: `<task>Post PR review comment via GitHub REST API.</task>
+
+<environment>
+Use these env vars:
+- GITHUB_TOKEN: Bearer token for auth
+- PR_OWNER: Repository owner
+- PR_REPO: Repository name
+- PR_NUMBER: Pull request number
+</environment>
+
+<api_call>
+Use gh CLI: gh issue comment $PR_NUMBER --repo $PR_OWNER/$PR_REPO --body "COMMENT"
+</api_call>
+
+<link_format>
+Always use full SHA in code links:
+https://github.com/OWNER/REPO/blob/FULL_SHA/path#L10-L15
+</link_format>
+
+Execute the API call with the provided review content.`,
+      tools: ['Bash'],
+      model: utilityModel as 'haiku' | 'sonnet' | 'opus',
+    },
+
+    // ==========================================
+    // REPRODUCTION AGENT
+    // ==========================================
+
+    'repro-creator': {
+      description: 'Creates bug reproduction + fixed version with pnpm patch, pushes to repros repo.',
+      alwaysSpawn: false,
+      skills: ['nuxt', 'vue', 'nuxthub'],
+      triggers: [],
+      prompt: `<task>Create a bug reproduction AND a fixed version for a GitHub issue.</task>
+
+<first_step>
+ALWAYS read ~/repros/CLAUDE.md first - it contains the full workflow and conventions.
+</first_step>
+
+<working_directory>
+All work happens in ~/repros. You have full Bash access to:
+- Run any command (pnpm, git, gh, etc.)
+- Create/edit files
+- Push to the repros repository
+</working_directory>
+
+<workflow>
+## Phase 1: Bug Reproduction
+1. Read ~/repros/CLAUDE.md for conventions
+2. Fetch the GitHub issue: \`gh issue view {url}\`
+3. Create folder: \`{library}-{issue-number}\` in ~/repros
+4. Scaffold minimal project
+5. Add minimal code to reproduce the bug
+6. Create README.md (see template below)
+7. Verify the bug is reproducible
+
+## Phase 2: Fixed Version
+1. Copy bug folder: \`cp -r {folder} {folder}-fixed\`
+2. cd into fixed folder
+3. Start patch: \`pnpm patch {package-name}\`
+4. Apply fix to the extracted package (path shown by pnpm patch)
+5. Commit patch: \`pnpm patch-commit '{extracted-path}'\`
+6. Verify the fix works
+7. Update README with ## Fix section
+
+## Phase 3: Push
+1. git add both folders
+2. git commit -m "add {library}-{issue} repro"
+3. git push
+4. Return GitHub links
+</workflow>
+
+<readme_template>
+# {library}-{issue-number}
+
+Issue: {github-issue-url}
+
+## Problem
+{Brief description}
+
+## Verify
+\`\`\`bash
+pnpm install && pnpm dev  # or pnpm build
+\`\`\`
+
+## Expected
+{What should happen}
+
+## Actual
+{What actually happens}
+</readme_template>
+
+<fixed_readme_addition>
+## Fix
+{Description of what the patch changes}
+
+Applied via \`pnpm patch {package}\`.
+</fixed_readme_addition>
+
+<output_format>
+## Reproduction Created
+
+**Bug folder**: \`{folder-name}\`
+**Fixed folder**: \`{folder-name}-fixed\`
+
+**GitHub**:
+- https://github.com/onmax/repros/tree/main/{folder-name}
+- https://github.com/onmax/repros/tree/main/{folder-name}-fixed
+
+**Commit**: https://github.com/onmax/repros/commit/{SHA}
+
+### Verify bug
+\`\`\`bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/onmax/repros.git
+cd repros && git sparse-checkout set {folder-name}
+cd {folder-name} && pnpm install && {verify-command}
+\`\`\`
+
+### Verify fix
+\`\`\`bash
+cd ../{folder-name}-fixed && pnpm install && {verify-command}
+\`\`\`
 </output_format>
 
-Be thorough but precise. Security findings must be verifiable.`,
-      tools: ['Read', 'Grep', 'Glob'],
-      model: securityModel as 'haiku' | 'sonnet' | 'opus',
+Use skills (nuxt, vue, nuxthub) for correct patterns. Keep reproduction MINIMAL.`,
+      tools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebFetch'],
+      model: analysisModel as 'haiku' | 'sonnet' | 'opus',
     },
   }
 }
+
+/**
+ * Get agents that should be spawned for given file patterns.
+ * Returns array of agent names to spawn.
+ */
+export function getAgentsForFiles(files: string[]): string[] {
+  const catalog = getAgentCatalog()
+  const agentsToSpawn = new Set<string>()
+
+  // Always spawn core agents
+  for (const [name, agent] of Object.entries(catalog)) {
+    if (agent.alwaysSpawn) {
+      agentsToSpawn.add(name)
+    }
+  }
+
+  // Check each file against agent triggers
+  for (const file of files) {
+    for (const [name, agent] of Object.entries(catalog)) {
+      if (!agent.triggers || agent.triggers.length === 0) continue
+      for (const trigger of agent.triggers) {
+        if (matchesTrigger(file, trigger)) {
+          agentsToSpawn.add(name)
+          break
+        }
+      }
+    }
+  }
+
+  return Array.from(agentsToSpawn)
+}
+
+/**
+ * Simple glob-like matching for trigger patterns.
+ */
+function matchesTrigger(file: string, pattern: string): boolean {
+  // Handle negation
+  if (pattern.startsWith('!')) {
+    return !matchesTrigger(file, pattern.slice(1))
+  }
+
+  // Handle ** (any path)
+  if (pattern.includes('**')) {
+    const regex = new RegExp(`^${pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*')}$`)
+    return regex.test(file)
+  }
+
+  // Handle * (single segment)
+  if (pattern.includes('*')) {
+    const regex = new RegExp(`^${pattern.replace(/\*/g, '[^/]*')}$`)
+    return regex.test(file)
+  }
+
+  // Exact match or contains
+  return file.includes(pattern)
+}
+
+/**
+ * Get skills needed for a set of agents.
+ */
+export function getSkillsForAgents(agentNames: string[]): string[] {
+  const catalog = getAgentCatalog()
+  const skills = new Set<string>()
+
+  for (const name of agentNames) {
+    const agent = catalog[name]
+    if (agent?.skills) {
+      for (const skill of agent.skills) {
+        skills.add(skill)
+      }
+    }
+  }
+
+  return Array.from(skills)
+}
+

@@ -1,3 +1,5 @@
+import { consola } from 'consola'
+
 export default defineEventHandler((event) => {
-  console.log(`[${new Date().toISOString()}] ${event.method} ${event.path}`)
+  consola.info(`${event.method} ${event.path}`)
 })
