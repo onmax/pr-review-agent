@@ -6,6 +6,7 @@ import { getGitHubApp, isGitHubAppConfigured } from '../utils/github-app'
 const IssueCommentSchema = z.object({
   action: z.literal('created'),
   comment: z.object({
+    id: z.number(),
     body: z.string(),
     user: z.object({ login: z.string() }),
   }),

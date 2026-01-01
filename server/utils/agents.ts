@@ -419,7 +419,7 @@ Confidence: 0-100
       description: 'Internationalization - translations, locale handling.',
       alwaysSpawn: false,
       skills: ['nuxt'],
-      triggers: ['**/locales/**', '**/*i18n*', '**/$t('],
+      triggers: ['**/locales/**', '**/*i18n*'],
       prompt: `<task>Review i18n patterns.</task>
 
 ${CODE_EXPLORATION}

@@ -47,6 +47,11 @@ export async function createIssueComment(owner: string, repo: string, issueNumbe
   return octokit.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body })
 }
 
+export async function updateIssueComment(owner: string, repo: string, commentId: number, body: string, installationId?: number) {
+  const octokit = await getOctokit(installationId)
+  return octokit.rest.issues.updateComment({ owner, repo, comment_id: commentId, body })
+}
+
 export async function getPullRequest(owner: string, repo: string, prNumber: number, installationId?: number) {
   const octokit = await getOctokit(installationId)
   return octokit.rest.pulls.get({ owner, repo, pull_number: prNumber })

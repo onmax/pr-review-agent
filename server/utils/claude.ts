@@ -5,7 +5,7 @@ import { consola } from 'consola'
 import { ofetch } from 'ofetch'
 import { join } from 'pathe'
 import { getAgentCatalog, getAgentsForFiles } from './agents'
-import { createIssueComment, getCloneToken, parseRepoFullName } from './github'
+import { createIssueComment, getCloneToken, parseRepoFullName, updateIssueComment } from './github'
 
 const logger = consola.withTag('pr-review')
 const SKILLS_URL = 'https://raw.githubusercontent.com/onmax/nuxt-skills/main/skills'
@@ -13,7 +13,7 @@ const SKILLS_URL = 'https://raw.githubusercontent.com/onmax/nuxt-skills/main/ski
 export interface WebhookPayload {
   repository: { full_name: string, clone_url: string }
   issue: { number: number }
-  comment: { body: string, user: { login: string } }
+  comment: { body: string, user: { login: string }, id?: number }
   installationId?: number // GitHub App installation ID
 }
 
@@ -29,11 +29,23 @@ async function runReview(payload: WebhookPayload): Promise<void> {
   const installationId = payload.installationId
   const workDir = await mkdtemp(join(tmpdir(), 'pr-review-'))
 
+  // Get or create status comment - we'll update this one comment throughout the review
+  let commentId = payload.comment.id
+  if (!commentId) {
+    const { data } = await createIssueComment(owner, repo, prNumber, '🔍 Starting PR review...', installationId)
+    commentId = data.id
+  }
+
+  const updateStatus = async (body: string) => {
+    await updateIssueComment(owner, repo, commentId!, body, installationId).catch(() => {})
+  }
+
   try {
     // Get token for cloning - uses installation token if available, else PAT
     const token = await getCloneToken(installationId)
     const cloneUrl = payload.repository.clone_url.replace('https://', `https://x-access-token:${token}@`)
 
+    await updateStatus('🔍 Cloning repository...')
     logger.info(`Cloning ${owner}/${repo} PR #${prNumber}`)
     execFileSync('git', ['clone', '--depth=50', cloneUrl, workDir], { stdio: 'pipe' })
     execFileSync('git', ['fetch', 'origin', `pull/${prNumber}/head:pr-branch`], { cwd: workDir, stdio: 'pipe' })
@@ -47,16 +59,14 @@ async function runReview(payload: WebhookPayload): Promise<void> {
     const agentsToSpawn = getAgentsForFiles(changedFiles)
     logger.info(`Spawning ${agentsToSpawn.length} agents: ${agentsToSpawn.join(', ')}`)
 
-    await createIssueComment(owner, repo, prNumber, `🔍 Starting PR review with ${agentsToSpawn.length} agents...`, installationId)
+    await updateStatus(`🔍 Analyzing ${changedFiles.length} files with ${agentsToSpawn.length} agents:\n${agentsToSpawn.map(a => `- ${a}`).join('\n')}`)
 
     await ensureSkills()
 
     const prompt = buildOrchestratorPrompt(owner, repo, prNumber, changedFiles, agentsToSpawn)
-    const promptFile = join(workDir, '.review-prompt.txt')
-    await writeFile(promptFile, prompt)
 
     logger.info('Running Claude Code (sandbox + bypassPermissions)')
-    const result = await runClaudeCLI(workDir, promptFile, token)
+    const result = await runClaudeCLI(workDir, prompt, token)
 
     logger.success(`Completed PR #${prNumber}`)
     if (result)
@@ -67,7 +77,7 @@ async function runReview(payload: WebhookPayload): Promise<void> {
   catch (error) {
     logger.error('Failed:', error)
     await rm(workDir, { recursive: true, force: true }).catch(() => {})
-    await createIssueComment(owner, repo, prNumber, `❌ Review failed. Check server logs.`, installationId).catch(() => {})
+    await updateStatus(`❌ Review failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 }
 
@@ -103,9 +113,9 @@ async function ensureSkills(): Promise<void> {
   }
 }
 
-function runClaudeCLI(cwd: string, promptFile: string, githubToken: string): Promise<string> {
+function runClaudeCLI(cwd: string, prompt: string, githubToken: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const claude = spawn('claude', ['--print', '--dangerously-skip-permissions', '--input-file', promptFile], {
+    const claude = spawn('claude', ['--print', '--dangerously-skip-permissions', prompt], {
       cwd,
       env: { ...process.env, GITHUB_TOKEN: githubToken },
       stdio: ['pipe', 'pipe', 'pipe'],
