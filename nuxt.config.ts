@@ -1,6 +1,22 @@
+import { z } from 'zod'
+
+const runtimeConfigSchema = z.object({
+  githubWebhookSecret: z.string().min(1, 'NUXT_GITHUB_WEBHOOK_SECRET is required'),
+  githubAppId: z.union([z.string(), z.number()]).optional(),
+  githubAppPrivateKey: z.string().optional(),
+  githubToken: z.string().optional(),
+  modelProvider: z.string().optional(),
+  defaultModel: z.string().optional(),
+  securityModel: z.string().optional(),
+  analysisModel: z.string().optional(),
+  utilityModel: z.string().optional(),
+}).passthrough()
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: false },
+
+  modules: ['nuxt-safe-runtime-config'],
 
   // Webhook-only server - no frontend
   ssr: false,
@@ -8,24 +24,21 @@ export default defineNuxtConfig({
   components: false,
 
   runtimeConfig: {
-    // Webhook secret (required)
     githubWebhookSecret: '',
-
-    // GitHub App auth (primary)
     githubAppId: '',
     githubAppPrivateKey: '',
-
-    // PAT fallback (for external repos or local dev)
     githubToken: '',
-
-    // Model configuration (for future provider flexibility)
-    modelProvider: 'claude', // claude | openai | local
+    modelProvider: 'claude',
     defaultModel: 'sonnet',
+    securityModel: 'opus',
+    analysisModel: 'sonnet',
+    utilityModel: 'haiku',
+  },
 
-    // Agent model overrides
-    securityModel: 'opus', // strongest for security
-    analysisModel: 'sonnet', // balanced for analysis
-    utilityModel: 'haiku', // fast for utility tasks
+  safeRuntimeConfig: {
+    $schema: runtimeConfigSchema,
+    validateAtBuild: false,
+    validateAtRuntime: true,
   },
 
   nitro: {

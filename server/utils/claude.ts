@@ -29,15 +29,12 @@ async function runReview(payload: WebhookPayload): Promise<void> {
   const installationId = payload.installationId
   const workDir = await mkdtemp(join(tmpdir(), 'pr-review-'))
 
-  // Get or create status comment - we'll update this one comment throughout the review
-  let commentId = payload.comment.id
-  if (!commentId) {
-    const { data } = await createIssueComment(owner, repo, prNumber, '🔍 Starting PR review...', installationId)
-    commentId = data.id
-  }
+  // Always create a new status comment (don't try to update user's /review comment)
+  const { data } = await createIssueComment(owner, repo, prNumber, '🔍 Starting PR review...', installationId)
+  const commentId = data.id
 
   const updateStatus = async (body: string) => {
-    await updateIssueComment(owner, repo, commentId!, body, installationId).catch(() => {})
+    await updateIssueComment(owner, repo, commentId, body, installationId).catch(() => {})
   }
 
   try {
@@ -193,9 +190,9 @@ Launch critic-agent to validate aggregated findings:
 - Remove nitpicks and style-only issues
 
 ## Step 5: Post Review
-Use gh CLI to post the review (GITHUB_TOKEN is set in env):
+Use gh API to create a PR review (GITHUB_TOKEN is set in env):
 
-gh issue comment ${prNumber} --repo ${owner}/${repo} --body "[REVIEW_CONTENT]"
+gh api repos/${owner}/${repo}/pulls/${prNumber}/reviews -f body="[REVIEW_CONTENT]" -f event="COMMENT"
 
 Format:
 ### 🔍 Code Review

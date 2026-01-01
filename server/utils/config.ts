@@ -4,8 +4,8 @@ import { z } from 'zod'
 const RuntimeConfigSchema = z.object({
   githubWebhookSecret: z.string().min(1, 'GITHUB_WEBHOOK_SECRET is required'),
 
-  // GitHub App (primary auth method)
-  githubAppId: z.string().optional(),
+  // GitHub App (primary auth method) - accepts string or number (Nuxt coerces numeric env vars)
+  githubAppId: z.union([z.string(), z.number()]).optional(),
   githubAppPrivateKey: z.string().optional(),
 
   // PAT fallback (for external repos or local dev)
