@@ -19,7 +19,7 @@
     "@anthropic-ai/claude-code": "^2.0.76",
     "consola": "^3.4.2",
     "giget": "^2.0.0",
-    "nuxt": "^4.2.2",
+    "nuxt": "^4.7.0",
     "nuxt-safe-runtime-config": "^0.0.16",
     "octokit": "^5.0.5",
     "ofetch": "^1.5.1",
@@ -33,6 +33,7 @@
     "@types/node": "^25.0.3",
     "eslint": "^9.39.2",
     "eslint-plugin-format": "^1.1.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.3.14"
   }
 }
